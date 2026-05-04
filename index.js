@@ -1,18 +1,34 @@
-const { MongoClient, ServerApiVersion } = require("mongodb");
 const express = require("express");
-const app = express();
 const cors = require("cors");
-require("dotenv").config();
-const port = process.env.PORT || 5000;
+const dotenv = require("dotenv");
 const dns = require("dns");
+const nodemailer = require("nodemailer");
+
+const { MongoClient, ServerApiVersion } = require("mongodb");
+
+const functions = require("firebase-functions");
+const admin = require("firebase-admin");
+
+const serviceAccount = require("./serviceAccountKey.json");
+
+admin.initializeApp({
+  credential: admin.credential.cert(serviceAccount)
+});
+dotenv.config();
+
+const app = express();
+const port = process.env.PORT || 5000;
+
+// DNS fix
 dns.setServers(["8.8.8.8", "8.8.4.4"]);
 
-// Middleware
-app.use(express.json());
+// middleware
 app.use(cors());
+app.use(express.json());
 
-// ----- Mongo DB Client Set Up -----
+/* ---- MONGODB SETUP -----*/
 const uri = `mongodb+srv://${process.env.DB_USER}:${process.env.DB_PASSWORD}@cluster0.ab3rgue.mongodb.net/?appName=Cluster0`;
+
 const client = new MongoClient(uri, {
   serverApi: {
     version: ServerApiVersion.v1,
@@ -21,12 +37,10 @@ const client = new MongoClient(uri, {
   },
 });
 
-// Database Connection Caching
 let db, userCollections;
+
 async function connectDB() {
-  if (db) {
-    return { userCollections };
-  }
+  if (db) return { userCollections };
 
   await client.connect();
   db = client.db("tradeCen_DB");
@@ -35,26 +49,133 @@ async function connectDB() {
   return { userCollections };
 }
 
-// --- API Routes ---
+/* ---- EXPRESS ROUTES ----*/
 
+// Create user
 app.post("/users", async (req, res) => {
-  const { userCollections } = await connectDB();
-  const user = req.body;
-  ((user.role = "user"), (user.createdAt = new Date()));
+  try {
+    const { userCollections } = await connectDB();
 
-  const isExist = await userCollections.findOne({ email: user.email });
-  if (isExist) {
-    return res.send({ message: "User Already Exist in DB! No Need To Insert" });
+    const user = req.body;
+    user.role = "user";
+    user.createdAt = new Date();
+
+    const isExist = await userCollections.findOne({ email: user.email });
+
+    if (isExist) {
+      return res.send({ message: "User already exists" });
+    }
+
+    const result = await userCollections.insertOne(user);
+
+    res.send(result);
+  } catch (err) {
+    res.status(500).send({ error: err.message });
   }
-
-  const result = await userCollections.insertOne(user);
-  res.send(result);
 });
 
+
+
+// Health check
 app.get("/", (req, res) => {
-  res.send("Hello World!");
+  res.send("🚀 TradeCen Server Running");
 });
 
-app.listen(port, () => {
-  console.log(`Example app listening on port ${port}`);
+/* ----- OTP SYSTEM (Express Routes) -----*/
+
+const transporter = nodemailer.createTransport({
+  service: "gmail",
+  auth: {
+    user: process.env.EMAIL,      // আপনার .env ফাইল থেকে ইমেইল
+    pass: process.env.EMAIL_PASS, // আপনার .env ফাইল থেকে অ্যাপ পাসওয়ার্ড
+  },
 });
+
+// ১. OTP পাঠানো
+app.post("/send-otp", async (req, res) => {
+  const { email } = req.body;
+  if (!email) return res.status(400).send({ error: "Email is required" });
+
+  try {
+    const otp = Math.floor(100000 + Math.random() * 900000);
+
+    // Firestore-এ OTP সেভ করা
+    await admin.firestore().collection("otps").doc(email).set({
+      otp,
+      expiresAt: Date.now() + 5 * 60 * 1000, // ৫ মিনিট মেয়াদ
+    });
+
+    // ইমেইল পাঠানো
+    await transporter.sendMail({
+      from: `"TradeCen" <${process.env.EMAIL}>`,
+      to: email,
+      subject: "Your OTP Code",
+      text: `Your OTP is ${otp}. It will expire in 5 minutes.`,
+    });
+
+    res.send({ success: true, message: "OTP sent successfully" });
+  } catch (error) {
+    console.error("Error sending OTP:", error);
+    res.status(500).send({ error: error.message });
+  }
+});
+
+// ২. OTP ভেরিফাই করা
+app.post("/verify-otp", async (req, res) => {
+  const { email, otp } = req.body;
+
+  try {
+    const doc = await admin.firestore().collection("otps").doc(email).get();
+
+    if (!doc.exists) {
+      return res.status(404).send({ error: "OTP not found. Please resend." });
+    }
+
+    const stored = doc.data();
+
+    if (Date.now() > stored.expiresAt) {
+      return res.status(400).send({ error: "OTP has expired" });
+    }
+
+    if (parseInt(otp) !== stored.otp) {
+      return res.status(400).send({ error: "Invalid OTP code" });
+    }
+
+    res.send({ success: true, message: "OTP verified" });
+  } catch (error) {
+    res.status(500).send({ error: error.message });
+  }
+});
+
+// ৩. পাসওয়ার্ড রিসেট করা
+app.post("/reset-password", async (req, res) => {
+  const { email, newPassword } = req.body;
+
+  try {
+    const user = await admin.auth().getUserByEmail(email);
+    await admin.auth().updateUser(user.uid, {
+      password: newPassword,
+    });
+
+    // পাসওয়ার্ড রিসেট সফল হলে ডাটাবেস থেকে OTP ডিলিট করে দিন (সিকিউরিটি)
+    await admin.firestore().collection("otps").doc(email).delete();
+
+    res.send({ success: true, message: "Password updated successfully" });
+  } catch (error) {
+    res.status(500).send({ error: error.message });
+  }
+});
+
+/* ---- START SERVER ---- */
+
+connectDB()
+  .then(() => {
+    console.log("🚀 MongoDB Connected");
+
+    app.listen(port, () => {
+      console.log(`Server running on port ${port}`);
+    });
+  })
+  .catch((err) => {
+    console.error("❌ DB connection failed:", err);
+  });
