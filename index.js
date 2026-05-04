@@ -8,7 +8,6 @@ const { MongoClient, ServerApiVersion } = require("mongodb");
 
 const functions = require("firebase-functions");
 const admin = require("firebase-admin");
-
 const serviceAccount = require("./serviceAccountKey.json");
 
 admin.initializeApp({
@@ -49,7 +48,7 @@ async function connectDB() {
   return { userCollections };
 }
 
-/* ---- EXPRESS ROUTES ----*/
+/* ---- EXPRESS ROUTES START HERE ----*/
 
 // Create user
 app.post("/users", async (req, res) => {
