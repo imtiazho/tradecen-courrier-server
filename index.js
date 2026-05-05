@@ -36,17 +36,18 @@ const client = new MongoClient(uri, {
   },
 });
 
-let db, userCollections, ridersCollections;
+let db, userCollections, ridersCollections, merchantsCollections;
 
 async function connectDB() {
-  if (db) return { userCollections, ridersCollections };
+  if (db) return { userCollections, ridersCollections, merchantsCollections };
 
   await client.connect();
   db = client.db("tradeCen_DB");
   userCollections = db.collection("users");
   ridersCollections = db.collection("riders");
+  merchantsCollections = db.collection("merchants");
 
-  return { userCollections, ridersCollections };
+  return { userCollections, ridersCollections, merchantsCollections };
 }
 
 /* ---- EXPRESS ROUTES START HERE ----*/
@@ -150,7 +151,34 @@ app.post("/riders", async (req, res) => {
 
     res.send(result);
   } catch (error) {
-    res.status(500).send({ error: err.message });
+    res.status(500).send({ error: error.message });
+  }
+});
+
+/* ---- Merchant APIs ---- */
+app.post("/merchants", async (req, res) => {
+  try {
+    const { merchantsCollections } = await connectDB();
+    const newMerchant = req.body;
+    const isExist = await merchantsCollections.findOne({
+      email: newMerchant.email,
+    });
+    if (isExist) {
+      return res.send({ message: "This email already used for Merchant!" });
+    }
+
+    const result = await merchantsCollections.insertOne(newMerchant);
+    const userRes = await userCollections.updateOne(
+      { email: newMerchant.email },
+      {
+        $set: {
+          role: "merchant",
+        },
+      },
+    );
+    res.send(result);
+  } catch (error) {
+    res.status(500).send({ error: error.message });
   }
 });
 
