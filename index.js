@@ -36,20 +36,22 @@ const client = new MongoClient(uri, {
   },
 });
 
-let db, userCollections;
+let db, userCollections, ridersCollections;
 
 async function connectDB() {
-  if (db) return { userCollections };
+  if (db) return { userCollections, ridersCollections };
 
   await client.connect();
   db = client.db("tradeCen_DB");
   userCollections = db.collection("users");
+  ridersCollections = db.collection("riders");
 
-  return { userCollections };
+  return { userCollections, ridersCollections };
 }
 
 /* ---- EXPRESS ROUTES START HERE ----*/
 
+/*---- User Related APIs ----*/
 // Load User
 app.get("/users", async (req, res) => {
   try {
@@ -126,6 +128,32 @@ app.post("/users", async (req, res) => {
   }
 });
 
+/*---- Rider Related APIs ----*/
+app.post("/riders", async (req, res) => {
+  try {
+    const { ridersCollections } = await connectDB();
+    const newRider = req.body;
+    const isExist = await ridersCollections.findOne({ email: newRider.email });
+    if (isExist) {
+      return res.send({ message: "This email already used for rider!" });
+    }
+
+    const result = await ridersCollections.insertOne(newRider);
+    const userRes = await userCollections.updateOne(
+      { email: newRider.email },
+      {
+        $set: {
+          role: "pending-rider",
+        },
+      },
+    );
+
+    res.send(result);
+  } catch (error) {
+    res.status(500).send({ error: err.message });
+  }
+});
+
 // Health check
 app.get("/", (req, res) => {
   res.send("🚀 TradeCen Server Running");
@@ -136,12 +164,11 @@ app.get("/", (req, res) => {
 const transporter = nodemailer.createTransport({
   service: "gmail",
   auth: {
-    user: process.env.EMAIL, // আপনার .env ফাইল থেকে ইমেইল
-    pass: process.env.EMAIL_PASS, // আপনার .env ফাইল থেকে অ্যাপ পাসওয়ার্ড
+    user: process.env.EMAIL,
+    pass: process.env.EMAIL_PASS,
   },
 });
 
-// ১. OTP পাঠানো
 app.post("/send-otp", async (req, res) => {
   const { email } = req.body;
   if (!email) return res.status(400).send({ error: "Email is required" });
@@ -149,17 +176,15 @@ app.post("/send-otp", async (req, res) => {
   try {
     const otp = Math.floor(100000 + Math.random() * 900000);
 
-    // Firestore-এ OTP সেভ করা
     await admin
       .firestore()
       .collection("otps")
       .doc(email)
       .set({
         otp,
-        expiresAt: Date.now() + 5 * 60 * 1000, // ৫ মিনিট মেয়াদ
+        expiresAt: Date.now() + 5 * 60 * 1000,
       });
 
-    // ইমেইল পাঠানো
     await transporter.sendMail({
       from: `"TradeCen" <${process.env.EMAIL}>`,
       to: email,
@@ -174,7 +199,6 @@ app.post("/send-otp", async (req, res) => {
   }
 });
 
-// ২. OTP ভেরিফাই করা
 app.post("/verify-otp", async (req, res) => {
   const { email, otp } = req.body;
 
@@ -201,7 +225,6 @@ app.post("/verify-otp", async (req, res) => {
   }
 });
 
-// ৩. পাসওয়ার্ড রিসেট করা
 app.post("/reset-password", async (req, res) => {
   const { email, newPassword } = req.body;
 
@@ -211,7 +234,6 @@ app.post("/reset-password", async (req, res) => {
       password: newPassword,
     });
 
-    // পাসওয়ার্ড রিসেট সফল হলে ডাটাবেস থেকে OTP ডিলিট করে দিন (সিকিউরিটি)
     await admin.firestore().collection("otps").doc(email).delete();
 
     res.send({ success: true, message: "Password updated successfully" });
