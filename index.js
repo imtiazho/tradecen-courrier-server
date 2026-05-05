@@ -11,7 +11,7 @@ const admin = require("firebase-admin");
 const serviceAccount = require("./serviceAccountKey.json");
 
 admin.initializeApp({
-  credential: admin.credential.cert(serviceAccount)
+  credential: admin.credential.cert(serviceAccount),
 });
 dotenv.config();
 
@@ -50,6 +50,58 @@ async function connectDB() {
 
 /* ---- EXPRESS ROUTES START HERE ----*/
 
+// Load User
+app.get("/users", async (req, res) => {
+  try {
+    const { userCollections } = await connectDB();
+    const searchText = req.query.searchText;
+
+    const query = {};
+
+    if (searchText) {
+      query.$or = [
+        { displayName: { $regex: searchText, $options: "i" } },
+        { email: { $regex: searchText, $options: "i" } },
+      ];
+    }
+
+    const result = await userCollections
+      .find(query)
+      .sort({ createdAt: -1 })
+      .limit(10)
+      .toArray();
+
+    res.send(result);
+  } catch (error) {
+    res.status(500).send({ message: "Internal Server Error" });
+  }
+});
+
+app.get("/user/:email", async (req, res) => {
+  try {
+    const { userCollections } = await connectDB();
+    const email = req.params.email;
+    const user = await userCollections.findOne({ email: email });
+
+    if (!user) {
+      return res.status(404).send({
+        success: false,
+        message: "User not found in database",
+      });
+    }
+
+    res.send({
+      success: true,
+      role: user.role,
+      isOnboarded: user.isOnboarded,
+      email: user.email,
+      ...user,
+    });
+  } catch (error) {
+    res.status(500).send({ success: false, error: "Internal Server Error" });
+  }
+});
+
 // Create user
 app.post("/users", async (req, res) => {
   try {
@@ -58,6 +110,7 @@ app.post("/users", async (req, res) => {
     const user = req.body;
     user.role = "user";
     user.createdAt = new Date();
+    user.isOnboarded = false;
 
     const isExist = await userCollections.findOne({ email: user.email });
 
@@ -73,8 +126,6 @@ app.post("/users", async (req, res) => {
   }
 });
 
-
-
 // Health check
 app.get("/", (req, res) => {
   res.send("🚀 TradeCen Server Running");
@@ -85,7 +136,7 @@ app.get("/", (req, res) => {
 const transporter = nodemailer.createTransport({
   service: "gmail",
   auth: {
-    user: process.env.EMAIL,      // আপনার .env ফাইল থেকে ইমেইল
+    user: process.env.EMAIL, // আপনার .env ফাইল থেকে ইমেইল
     pass: process.env.EMAIL_PASS, // আপনার .env ফাইল থেকে অ্যাপ পাসওয়ার্ড
   },
 });
@@ -99,10 +150,14 @@ app.post("/send-otp", async (req, res) => {
     const otp = Math.floor(100000 + Math.random() * 900000);
 
     // Firestore-এ OTP সেভ করা
-    await admin.firestore().collection("otps").doc(email).set({
-      otp,
-      expiresAt: Date.now() + 5 * 60 * 1000, // ৫ মিনিট মেয়াদ
-    });
+    await admin
+      .firestore()
+      .collection("otps")
+      .doc(email)
+      .set({
+        otp,
+        expiresAt: Date.now() + 5 * 60 * 1000, // ৫ মিনিট মেয়াদ
+      });
 
     // ইমেইল পাঠানো
     await transporter.sendMail({
