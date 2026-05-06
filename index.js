@@ -111,9 +111,6 @@ app.post("/users", async (req, res) => {
     const { userCollections } = await connectDB();
 
     const user = req.body;
-    user.role = "user";
-    user.createdAt = new Date();
-    user.isOnboarded = false;
 
     const isExist = await userCollections.findOne({ email: user.email });
 
@@ -126,6 +123,24 @@ app.post("/users", async (req, res) => {
     res.send(result);
   } catch (err) {
     res.status(500).send({ error: err.message });
+  }
+});
+
+// User isOnboarded status update
+app.patch("/users/verify-status/:email", async (req, res) => {
+  try {
+    const { userCollections } = await connectDB();
+    const result = await userCollections.updateOne(
+      { email: req.params.email },
+      {
+        $set: {
+          isOnboarded: true,
+        },
+      },
+    );
+    res.send(result);
+  } catch (error) {
+    res.status(500).send({ error: error.message });
   }
 });
 
