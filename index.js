@@ -105,6 +105,24 @@ app.get("/user/:email", async (req, res) => {
   }
 });
 
+app.patch("/users/update/:email", async (req, res) => {
+  try {
+    const { userCollections } = await connectDB();
+    const result = await userCollections.updateOne(
+      { email: req.params.email },
+      {
+        $set: {
+          ...req.body,
+        },
+      },
+    );
+
+    res.send(result);
+  } catch (error) {
+    res.status(500).send({ success: false, error: "Internal Server Error" });
+  }
+});
+
 // Create user
 app.post("/users", async (req, res) => {
   try {
