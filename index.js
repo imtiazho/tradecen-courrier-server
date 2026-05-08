@@ -36,24 +36,39 @@ const client = new MongoClient(uri, {
   },
 });
 
-let db, userCollections, ridersCollections, merchantsCollections;
+let db,
+  userCollections,
+  ridersCollections,
+  merchantsCollections,
+  parcelsCollections;
 
 async function connectDB() {
-  if (db) return { userCollections, ridersCollections, merchantsCollections };
+  if (db)
+    return {
+      userCollections,
+      ridersCollections,
+      merchantsCollections,
+      parcelsCollections,
+    };
 
   await client.connect();
   db = client.db("tradeCen_DB");
   userCollections = db.collection("users");
   ridersCollections = db.collection("riders");
   merchantsCollections = db.collection("merchants");
+  parcelsCollections = db.collection("parcels");
 
-  return { userCollections, ridersCollections, merchantsCollections };
+  return {
+    userCollections,
+    ridersCollections,
+    merchantsCollections,
+    parcelsCollections,
+  };
 }
 
 /* ---- EXPRESS ROUTES START HERE ----*/
 
 /*---- User Related APIs ----*/
-// Load User
 app.get("/users", async (req, res) => {
   try {
     const { userCollections } = await connectDB();
@@ -123,7 +138,6 @@ app.patch("/users/update/:email", async (req, res) => {
   }
 });
 
-// Create user
 app.post("/users", async (req, res) => {
   try {
     const { userCollections } = await connectDB();
@@ -144,7 +158,6 @@ app.post("/users", async (req, res) => {
   }
 });
 
-// User isOnboarded status update
 app.patch("/users/verify-status/:email", async (req, res) => {
   try {
     const { userCollections } = await connectDB();
@@ -213,6 +226,40 @@ app.post("/merchants", async (req, res) => {
   } catch (error) {
     res.status(500).send({ error: error.message });
   }
+});
+
+app.get("/merchant/:email", async (req, res) => {
+  try {
+    const { merchantsCollections } = await connectDB();
+    const email = req.params.email;
+    const merchant = await merchantsCollections.findOne({ email: email });
+
+    if (!merchant) {
+      return res.status(404).send({
+        success: false,
+        message: "User not found in database",
+      });
+    }
+
+    res.send({
+      success: true,
+      role: merchant.role,
+      email: merchant.email,
+      ...merchant,
+    });
+  } catch (error) {
+    res.status(500).send({ success: false, error: "Internal Server Error" });
+  }
+});
+
+/*---- Parcels Related APIs ----*/
+app.post("/parcels", async (req, res) => {
+  try {
+    const { parcelsCollections } = await connectDB();
+    const newParcel = req.body;
+    const result = await parcelsCollections.insertOne(newParcel);
+    res.send(result);
+  } catch (error) {}
 });
 
 // Health check
