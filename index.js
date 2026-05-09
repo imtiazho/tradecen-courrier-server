@@ -314,6 +314,59 @@ app.get("/parcels/stats/:email", async (req, res) => {
   }
 });
 
+app.get("/revenue/stats/:email", async (req, res) => {
+  try {
+    const { parcelsCollections } = await connectDB();
+    const stats = await parcelsCollections
+      .aggregate([
+        {
+          $match: {
+            "senderInfo.email": req.params.email,
+            deliveryStatus: "delivered",
+          },
+        },
+        {
+          $group: {
+            _id: {
+              $dateToString: {
+                format: "%d-%m-%Y",
+                date: { $toDate: "$createdAt" },
+              },
+            },
+            totalRevenue: { $sum: "$cost" },
+          },
+        },
+        { $sort: { _id: 1 } },
+      ])
+      .toArray();
+
+    const chartData = stats.map((element) => ({
+      name: element._id,
+      value: element.totalRevenue,
+    }));
+
+    res.send(chartData);
+  } catch (error) {
+    res.status(500).send({ message: "Internal Server Error" });
+  }
+});
+
+app.get("/merchant-parcels/:email", async (req, res) => {
+  try {
+    const { parcelsCollections } = await connectDB();
+    const email = req.params.email;
+
+    const result = await parcelsCollections
+      .find({ "senderInfo.email": email })
+      .sort({ createdAt: -1 })
+      .toArray();
+
+    res.send(result);
+  } catch (error) {
+    res.status(500).send({ message: "Error loading reports" });
+  }
+});
+
 // Health check
 app.get("/", (req, res) => {
   res.send("🚀 TradeCen Server Running");
