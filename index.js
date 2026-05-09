@@ -9,6 +9,7 @@ const { MongoClient, ServerApiVersion } = require("mongodb");
 const functions = require("firebase-functions");
 const admin = require("firebase-admin");
 const serviceAccount = require("./serviceAccountKey.json");
+const { stat } = require("fs");
 
 admin.initializeApp({
   credential: admin.credential.cert(serviceAccount),
@@ -120,6 +121,14 @@ app.get("/user/:email", async (req, res) => {
   }
 });
 
+app.get("/user/:email/role", async (req, res) => {
+  try {
+    const { userCollections } = await connectDB();
+    const user = await userCollections.findOne({ email: req.params.email });
+    res.send({ role: user.role });
+  } catch (error) {}
+});
+
 app.patch("/users/update/:email", async (req, res) => {
   try {
     const { userCollections } = await connectDB();
@@ -175,7 +184,7 @@ app.patch("/users/verify-status/:email", async (req, res) => {
   }
 });
 
-/*---- Rider Related APIs ----*/
+/*---- Rider Related APIs Start ----*/
 app.post("/riders", async (req, res) => {
   try {
     const { ridersCollections } = await connectDB();
@@ -201,7 +210,7 @@ app.post("/riders", async (req, res) => {
   }
 });
 
-/* ---- Merchant APIs ---- */
+/* ---- Merchant APIs Start ---- */
 app.post("/merchants", async (req, res) => {
   try {
     const { merchantsCollections } = await connectDB();
@@ -259,7 +268,50 @@ app.post("/parcels", async (req, res) => {
     const newParcel = req.body;
     const result = await parcelsCollections.insertOne(newParcel);
     res.send(result);
-  } catch (error) {}
+  } catch (error) {
+    res.status(500).send({ message: "Internal Server Error" });
+  }
+});
+
+app.get("/parcels/stats/:email", async (req, res) => {
+  try {
+    const { parcelsCollections } = await connectDB();
+    const stats = await parcelsCollections
+      .aggregate([
+        {
+          $match: { "senderInfo.email": req.params.email },
+        },
+        {
+          $group: {
+            _id: "$deliveryStatus",
+            count: { $sum: 1 },
+          },
+        },
+      ])
+      .toArray();
+
+    const formattedData = {
+      toPay: 0,
+      readyPickUp: 0,
+      inTransit: 0,
+      readyDeliver: 0,
+      delivered: 0,
+    };
+
+    stats.forEach((element) => {
+      if (element._id === "parcel-created") formattedData.toPay = element.count;
+      if (element._id === "ready-pickup")
+        formattedData.readyPickUp = element.count;
+      if (element._id === "in-transit") formattedData.inTransit = element.count;
+      if (element._id === "ready-deliver")
+        formattedData.readyDeliver = element.count;
+      if (element._id === "delivered") formattedData.delivered = element.count;
+    });
+
+    res.send(formattedData);
+  } catch (error) {
+    res.status(500).send({ message: "Internal Server Error" });
+  }
 });
 
 // Health check
