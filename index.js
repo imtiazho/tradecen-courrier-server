@@ -276,9 +276,39 @@ app.post("/parcels", async (req, res) => {
 app.get("/parcels", async (req, res) => {
   try {
     const { parcelsCollections } = await connectDB();
-    const result = await parcelsCollections.find().toArray();
-    res.send(result);
-  } catch (error) {}
+    const  skip = parseInt(req.query.skip);
+    const  limit = parseInt(req.query.limit);
+    const { email, filter } = req.query;
+
+    let startDate = new Date();
+    if (filter === "this-week") {
+      startDate.setDate(startDate.getDate() - 7);
+    } else if (filter === "last-week") {
+      startDate.setDate(startDate.getDate() - 14);
+    } else if (filter === "last-month") {
+      startDate.setMonth(startDate.getMonth() - 1);
+    } else {
+      startDate = null;
+    }
+
+    const query = { "senderInfo.email": email };
+    if (startDate) {
+      query.createdAt = { $gte: startDate.toString() };
+    }
+
+    const result = await parcelsCollections
+      .find(query)
+      .sort({ createdAt: -1 })
+      .skip(skip)
+      .limit(limit)
+      .toArray();
+
+    const count = await parcelsCollections.countDocuments(query);
+
+    res.send({ count, data: result });
+  } catch (error) {
+    res.status(500).send({ message: "Internal Server Error" });
+  }
 });
 
 app.get("/parcels/stats/:email", async (req, res) => {
