@@ -273,6 +273,14 @@ app.post("/parcels", async (req, res) => {
   }
 });
 
+app.get("/parcels", async (req, res) => {
+  try {
+    const { parcelsCollections } = await connectDB();
+    const result = await parcelsCollections.find().toArray();
+    res.send(result);
+  } catch (error) {}
+});
+
 app.get("/parcels/stats/:email", async (req, res) => {
   try {
     const { parcelsCollections } = await connectDB();
@@ -317,19 +325,34 @@ app.get("/parcels/stats/:email", async (req, res) => {
 app.get("/revenue/stats/:email", async (req, res) => {
   try {
     const { parcelsCollections } = await connectDB();
+    const { filter } = req.query;
+
+    let startDate = new Date();
+
+    if (filter === "this-week") {
+      startDate.setDate(startDate.getDate() - 7);
+    } else if (filter === "last-week") {
+      startDate.setDate(startDate.getDate() - 14);
+    } else if (filter === "last-month") {
+      startDate.setMonth(startDate.getMonth() - 1);
+    } else {
+      startDate.setDate(startDate.getDate() - 7);
+    }
+
     const stats = await parcelsCollections
       .aggregate([
         {
           $match: {
             "senderInfo.email": req.params.email,
             deliveryStatus: "delivered",
+            createdAt: { $gte: startDate.toISOString() },
           },
         },
         {
           $group: {
             _id: {
               $dateToString: {
-                format: "%d-%m-%Y",
+                format: "%d %b",
                 date: { $toDate: "$createdAt" },
               },
             },
@@ -373,7 +396,6 @@ app.get("/", (req, res) => {
 });
 
 /* ----- OTP SYSTEM (Express Routes) -----*/
-
 const transporter = nodemailer.createTransport({
   service: "gmail",
   auth: {
