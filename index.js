@@ -279,7 +279,7 @@ app.get("/parcels", async (req, res) => {
     const  skip = parseInt(req.query.skip);
     const  limit = parseInt(req.query.limit);
     const { email, filter } = req.query;
-
+    
     let startDate = new Date();
     if (filter === "this-week") {
       startDate.setDate(startDate.getDate() - 7);
@@ -293,7 +293,7 @@ app.get("/parcels", async (req, res) => {
 
     const query = { "senderInfo.email": email };
     if (startDate) {
-      query.createdAt = { $gte: startDate.toString() };
+      query.createdAt = { $gte: startDate.toISOString() };
     }
 
     const result = await parcelsCollections
