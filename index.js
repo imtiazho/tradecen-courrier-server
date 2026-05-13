@@ -4,7 +4,7 @@ const dotenv = require("dotenv");
 const dns = require("dns");
 const nodemailer = require("nodemailer");
 
-const { MongoClient, ServerApiVersion } = require("mongodb");
+const { MongoClient, ServerApiVersion, ObjectId } = require("mongodb");
 
 const functions = require("firebase-functions");
 const admin = require("firebase-admin");
@@ -262,24 +262,14 @@ app.get("/merchant/:email", async (req, res) => {
 });
 
 /*---- Parcels Related APIs ----*/
-app.post("/parcels", async (req, res) => {
-  try {
-    const { parcelsCollections } = await connectDB();
-    const newParcel = req.body;
-    const result = await parcelsCollections.insertOne(newParcel);
-    res.send(result);
-  } catch (error) {
-    res.status(500).send({ message: "Internal Server Error" });
-  }
-});
 
 app.get("/parcels", async (req, res) => {
   try {
     const { parcelsCollections } = await connectDB();
-    const  skip = parseInt(req.query.skip);
-    const  limit = parseInt(req.query.limit);
+    const skip = parseInt(req.query.skip);
+    const limit = parseInt(req.query.limit);
     const { email, filter } = req.query;
-    
+
     let startDate = new Date();
     if (filter === "this-week") {
       startDate.setDate(startDate.getDate() - 7);
@@ -308,6 +298,35 @@ app.get("/parcels", async (req, res) => {
     res.send({ count, data: result });
   } catch (error) {
     res.status(500).send({ message: "Internal Server Error" });
+  }
+});
+
+app.get("/parcels/unpaid/:email", async (req, res) => {
+  try {
+    const { email } = req.params;
+    const { parcelsCollections } = await connectDB();
+
+    const query = {
+      "senderInfo.email": email,
+      deliveryChargeStatus: "unpaid",
+    };
+
+    const unpaidParcels = await parcelsCollections.find(query).toArray();
+
+    const totalDue = unpaidParcels.reduce(
+      (sum, parcel) => sum + (parcel.deliveryCharge || 0),
+      0,
+    );
+
+    res.status(200).send({
+      success: true,
+      totalDue,
+      count: unpaidParcels.length,
+      data: unpaidParcels,
+    });
+  } catch (error) {
+    console.error("Error fetching unpaid parcels:", error);
+    res.status(500).send({ success: false, message: "Internal Server Error" });
   }
 });
 
@@ -417,6 +436,29 @@ app.get("/merchant-parcels/:email", async (req, res) => {
     res.send(result);
   } catch (error) {
     res.status(500).send({ message: "Error loading reports" });
+  }
+});
+
+app.post("/parcels", async (req, res) => {
+  try {
+    const { parcelsCollections } = await connectDB();
+    const newParcel = req.body;
+    const result = await parcelsCollections.insertOne(newParcel);
+    res.send(result);
+  } catch (error) {
+    res.status(500).send({ message: "Internal Server Error" });
+  }
+});
+
+app.delete("/parcel/:id", async (req, res) => {
+  try {
+    const { parcelsCollections } = await connectDB();
+    const result = await parcelsCollections.deleteOne({
+      _id: new ObjectId(req.params.id),
+    });
+    res.send(result);
+  } catch (error) {
+     res.status(500).send({ message: "Internal Server Error" });
   }
 });
 
