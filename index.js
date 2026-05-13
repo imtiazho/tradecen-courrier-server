@@ -26,6 +26,9 @@ dns.setServers(["8.8.8.8", "8.8.4.4"]);
 app.use(cors());
 app.use(express.json());
 
+// stripe
+const stripe = require("stripe")(process.env.STRIPE_SECRET);
+
 /* ---- MONGODB SETUP -----*/
 const uri = `mongodb+srv://${process.env.DB_USER}:${process.env.DB_PASSWORD}@cluster0.ab3rgue.mongodb.net/?appName=Cluster0`;
 
@@ -41,7 +44,8 @@ let db,
   userCollections,
   ridersCollections,
   merchantsCollections,
-  parcelsCollections;
+  parcelsCollections,
+  paymentCollections;
 
 async function connectDB() {
   if (db)
@@ -50,6 +54,7 @@ async function connectDB() {
       ridersCollections,
       merchantsCollections,
       parcelsCollections,
+      paymentCollections,
     };
 
   await client.connect();
@@ -58,12 +63,14 @@ async function connectDB() {
   ridersCollections = db.collection("riders");
   merchantsCollections = db.collection("merchants");
   parcelsCollections = db.collection("parcels");
+  paymentCollections = db.collection("payments");
 
   return {
     userCollections,
     ridersCollections,
     merchantsCollections,
     parcelsCollections,
+    paymentCollections,
   };
 }
 
@@ -262,7 +269,6 @@ app.get("/merchant/:email", async (req, res) => {
 });
 
 /*---- Parcels Related APIs ----*/
-
 app.get("/parcels", async (req, res) => {
   try {
     const { parcelsCollections } = await connectDB();
@@ -458,13 +464,86 @@ app.delete("/parcel/:id", async (req, res) => {
     });
     res.send(result);
   } catch (error) {
-     res.status(500).send({ message: "Internal Server Error" });
+    res.status(500).send({ message: "Internal Server Error" });
   }
 });
 
 // Health check
 app.get("/", (req, res) => {
   res.send("🚀 TradeCen Server Running");
+});
+
+/* ----- Payment Method -----*/
+app.post("/payment-checkout", async (req, res) => {
+  const paymentInfo = req.body;
+  const amount = parseInt(paymentInfo.deliveryCharge) * 100;
+  const session = await stripe.checkout.sessions.create({
+    line_items: [
+      {
+        price_data: {
+          currency: "USD",
+          unit_amount: amount,
+          product_data: {
+            name: `Payment checkout for ${paymentInfo.parcelName}`,
+          },
+        },
+        quantity: 1,
+      },
+    ],
+    mode: "payment",
+    metadata: {
+      parcelId: paymentInfo.parcelId,
+      percelName: paymentInfo.percelName,
+      trackingID: paymentInfo.trackingID,
+    },
+    customer_email: paymentInfo.senderEmail,
+    success_url: `${process.env.SITE_DOMAIN}/dashboard/payment-success?session_id={CHECKOUT_SESSION_ID}`,
+    cancel_url: `${process.env.SITE_DOMAIN}/dashboard/payment-cancelled`,
+  });
+
+  res.send({ url: session.url });
+});
+
+app.patch("/verify-payment", async (req, res) => {
+  const { paymentCollections, parcelsCollections } = await connectDB();
+  const session = await stripe.checkout.sessions.retrieve(req.query.session_id);
+  const transactionId = session.payment_intent;
+
+  const paymentExisted = await paymentCollections.findOne({ transactionId });
+  if (paymentExisted)
+    return res.send({
+      message: "Already exist",
+      transactionId,
+      trackingID: paymentExisted.trackingID,
+    });
+
+  const trackingID = session.metadata.trackingID;
+  if (session.payment_status === "paid") {
+    await parcelsCollections.updateOne(
+      { _id: new ObjectId(session.metadata.parcelId) },
+      {
+        $set: {
+          deliveryChargeStatus: "paid",
+          deliveryStatus: "pending-pickup",
+        },
+      },
+    );
+
+    const paymentHistory = {
+      product: session.metadata.percelName,
+      amount: session.amount_total / 100,
+      customer_email: session.customer_email,
+      transactionId,
+      trackingID,
+      paidAt: new Date(),
+    };
+    await paymentCollections.insertOne(paymentHistory);
+
+    // Logs Stream Here
+
+    return res.send({ success: true, transactionId, trackingID });
+  }
+  res.send({ success: false });
 });
 
 /* ----- OTP SYSTEM (Express Routes) -----*/
