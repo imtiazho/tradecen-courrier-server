@@ -45,7 +45,8 @@ let db,
   ridersCollections,
   merchantsCollections,
   parcelsCollections,
-  paymentCollections;
+  paymentCollections,
+  trackingLogsCollections;
 
 async function connectDB() {
   if (db)
@@ -55,6 +56,7 @@ async function connectDB() {
       merchantsCollections,
       parcelsCollections,
       paymentCollections,
+      trackingLogsCollections,
     };
 
   await client.connect();
@@ -64,6 +66,7 @@ async function connectDB() {
   merchantsCollections = db.collection("merchants");
   parcelsCollections = db.collection("parcels");
   paymentCollections = db.collection("payments");
+  trackingLogsCollections = db.collection("trackingLogs");
 
   return {
     userCollections,
@@ -71,8 +74,21 @@ async function connectDB() {
     merchantsCollections,
     parcelsCollections,
     paymentCollections,
+    trackingLogsCollections,
   };
 }
+
+/* ----- Helpers ------ */
+const logTracking = async (trackingID, status) => {
+  const { trackingLogsCollections } = await connectDB();
+  const log = {
+    trackingID,
+    deliveryStatus: status,
+    details: status.split("-").join(" "),
+    createdAt: new Date(),
+  };
+  return await trackingLogsCollections.insertOne(log);
+};
 
 /* ---- EXPRESS ROUTES START HERE ----*/
 
@@ -217,6 +233,92 @@ app.post("/riders", async (req, res) => {
   }
 });
 
+app.get("/riders", async (req, res) => {
+  try {
+    const { ridersCollections } = await connectDB();
+    const status = req.query.status;
+    let query = {};
+
+    if (status) {
+      query = { status: status };
+    }
+
+    const result = await ridersCollections.find(query).toArray();
+
+    res.status(200).send(result);
+  } catch (error) {
+    console.error("Error fetching riders:", error);
+    res.status(500).send({ message: "Internal Server Error" });
+  }
+});
+
+app.patch("/riders/:id", async (req, res) => {
+  try {
+    const { ridersCollections, userCollections } = await connectDB();
+    const id = req.params.id;
+    const { status, workStatus, email } = req.body;
+
+    const riderFilter = { _id: new ObjectId(id) };
+    const riderUpdate = {
+      $set: {
+        status: status,
+        workStatus: workStatus,
+        updatedAt: new Date(),
+      },
+    };
+
+    const riderResult = await ridersCollections.updateOne(
+      riderFilter,
+      riderUpdate,
+    );
+
+    if (riderResult.modifiedCount > 0) {
+      const userFilter = { email: email };
+      const userUpdate = {
+        $set: {
+          role: "rider",
+        },
+      };
+
+      const userResult = await userCollections.updateOne(
+        userFilter,
+        userUpdate,
+      );
+
+      res.send({
+        success: true,
+        message: "Rider approved and user role updated to rider",
+        riderResult,
+        userResult,
+      });
+    } else {
+      res.status(404).send({ message: "Rider not found or no changes made" });
+    }
+  } catch (error) {
+    console.error("Error approving rider:", error);
+    res.status(500).send({ message: "Internal Server Error" });
+  }
+});
+
+app.delete("/riders/:id", async (req, res) => {
+  try {
+    const { ridersCollections } = await connectDB();
+    const id = req.params.id;
+    const query = { _id: new ObjectId(id) };
+
+    const result = await ridersCollections.deleteOne(query);
+
+    if (result.deletedCount > 0) {
+      res.send(result);
+    } else {
+      res.status(404).send({ message: "Rider not found" });
+    }
+  } catch (error) {
+    console.error("Error deleting rider:", error);
+    res.status(500).send({ message: "Internal Server Error" });
+  }
+});
+
 /* ---- Merchant APIs Start ---- */
 app.post("/merchants", async (req, res) => {
   try {
@@ -274,7 +376,7 @@ app.get("/parcels", async (req, res) => {
     const { parcelsCollections } = await connectDB();
     const skip = parseInt(req.query.skip);
     const limit = parseInt(req.query.limit);
-    const { email, filter } = req.query;
+    const { email, filter, search } = req.query;
 
     let startDate = new Date();
     if (filter === "this-week") {
@@ -291,6 +393,15 @@ app.get("/parcels", async (req, res) => {
     if (startDate) {
       query.createdAt = { $gte: startDate.toISOString() };
     }
+    if (req.query.status) {
+      query.deliveryStatus = req.query.status;
+    }
+    // if (search) {
+    //   query.$or = [
+    //     { trackingID: { $regex: search, $options: "i" } },
+    //     { "receiverInfo.name": { $regex: search, $options: "i" } },
+    //   ];
+    // }
 
     const result = await parcelsCollections
       .find(query)
@@ -317,7 +428,10 @@ app.get("/parcels/unpaid/:email", async (req, res) => {
       deliveryChargeStatus: "unpaid",
     };
 
-    const unpaidParcels = await parcelsCollections.find(query).toArray();
+    const unpaidParcels = await parcelsCollections
+      .find(query)
+      .sort({ createdAt: -1 })
+      .toArray();
 
     const totalDue = unpaidParcels.reduce(
       (sum, parcel) => sum + (parcel.deliveryCharge || 0),
@@ -333,6 +447,27 @@ app.get("/parcels/unpaid/:email", async (req, res) => {
   } catch (error) {
     console.error("Error fetching unpaid parcels:", error);
     res.status(500).send({ success: false, message: "Internal Server Error" });
+  }
+});
+
+app.get("/parcels/status/:email", async (req, res) => {
+  try {
+    const { parcelsCollections } = await connectDB();
+    const email = req.params.email;
+    const status = req.query.status;
+
+    let query = { "senderInfo.email": email };
+
+    if (status) {
+      query.deliveryStatus = status;
+    }
+
+    const result = await parcelsCollections.find(query).toArray();
+
+    res.send(result);
+  } catch (error) {
+    console.error("Error loading filtered parcels:", error);
+    res.status(500).send({ message: "Internal Server Error" });
   }
 });
 
@@ -363,10 +498,10 @@ app.get("/parcels/stats/:email", async (req, res) => {
 
     stats.forEach((element) => {
       if (element._id === "parcel-created") formattedData.toPay = element.count;
-      if (element._id === "ready-pickup")
+      if (element._id === "ready-to-pickup")
         formattedData.readyPickUp = element.count;
       if (element._id === "in-transit") formattedData.inTransit = element.count;
-      if (element._id === "ready-deliver")
+      if (element._id === "ready-to-deliver")
         formattedData.readyDeliver = element.count;
       if (element._id === "delivered") formattedData.delivered = element.count;
     });
@@ -449,6 +584,7 @@ app.post("/parcels", async (req, res) => {
   try {
     const { parcelsCollections } = await connectDB();
     const newParcel = req.body;
+    await logTracking(newParcel.trackingID, newParcel.deliveryStatus);
     const result = await parcelsCollections.insertOne(newParcel);
     res.send(result);
   } catch (error) {
@@ -513,6 +649,7 @@ app.patch("/verify-payment", async (req, res) => {
   if (paymentExisted)
     return res.send({
       message: "Already exist",
+      ...paymentExisted,
       transactionId,
       trackingID: paymentExisted.trackingID,
     });
@@ -541,7 +678,12 @@ app.patch("/verify-payment", async (req, res) => {
 
     // Logs Stream Here
 
-    return res.send({ success: true, transactionId, trackingID });
+    return res.send({
+      success: true,
+      ...paymentHistory,
+      transactionId,
+      trackingID,
+    });
   }
   res.send({ success: false });
 });
