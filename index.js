@@ -266,15 +266,14 @@ app.patch("/users/make-hub-manager", async (req, res) => {
 });
 
 /* ---- Managers ---- */
-app.get("/users/hub-managers/:email", async (req, res) => {
+app.get("/users/hub-managers", async (req, res) => {
   try {
-    const email = req.params;
-    const { region, district } = req.query;
+    // const email = req.params;
+    const { region, district, email } = req.query;
 
     let query = {};
 
-    if(email)
-    {
+    if (email) {
       query.email = email;
     }
 
@@ -304,6 +303,10 @@ app.get("/parcels/incoming/:hubName", async (req, res) => {
         {
           "serviceCenters.origin": hubName,
           deliveryStatus: "parcel-created",
+        },
+        {
+          "serviceCenters.origin": hubName,
+          deliveryStatus: "assign-pickup-rider",
         },
         {
           "serviceCenters.destination": hubName,
@@ -367,6 +370,49 @@ app.get("/riders", async (req, res) => {
   }
 });
 
+// app.get("/riders", async (req, res) => {
+//   try {
+//     const { ridersCollections } = await connectDB();
+//     const { status, workStatus } = req.query;
+//     let query = {};
+
+//     if (status) {
+//       query.status = status;
+//     }
+
+//     if (workStatus) {
+//       query.workStatus = workStatus;
+//     }
+
+//     const result = await ridersCollections.find(query).toArray();
+
+//     res.status(200).send(result);
+//   } catch (error) {
+//     console.error("Error fetching riders:", error);
+//     res.status(500).send({ message: "Internal Server Error" });
+//   }
+// });
+
+app.get("/riders/available/:areaName", async (req, res) => {
+  try {
+    const { areaName } = req.params;
+    const { ridersCollections } = await connectDB();
+
+    const query = {
+      area: areaName,
+      workStatus: "available",
+      currentTasks: { $lt: 10 },
+    };
+
+    const riders = await ridersCollections.find(query).toArray();
+    res.status(200).send(riders);
+  } catch (error) {
+    res
+      .status(500)
+      .send({ message: "Error fetching riders", error: error.message });
+  }
+});
+
 app.patch("/riders/:id", async (req, res) => {
   try {
     const { ridersCollections, userCollections } = await connectDB();
@@ -412,6 +458,53 @@ app.patch("/riders/:id", async (req, res) => {
   } catch (error) {
     console.error("Error approving rider:", error);
     res.status(500).send({ message: "Internal Server Error" });
+  }
+});
+
+app.patch("/parcels/assign-rider", async (req, res) => {
+  try {
+    const { parcelId, riderId, riderName, riderEmail, riderPhone, trackingID } =
+      req.body;
+    const { parcelsCollections, ridersCollections } = await connectDB();
+
+    const parcelUpdate = await parcelsCollections.updateOne(
+      { _id: new ObjectId(parcelId) },
+      {
+        $set: {
+          deliveryStatus: "assign-pickup-rider",
+          pickupRider: {
+            id: riderId,
+            name: riderName,
+            email: riderEmail,
+            phone: riderPhone,
+          },
+        },
+      },
+    );
+
+    const riderUpdate = await ridersCollections.updateOne(
+      { _id: new ObjectId(riderId) },
+      {
+        $inc: { currentTasks: 1 },
+        $push: {
+          activeTasks: {
+            parcelId: new ObjectId(parcelId),
+            trackingID: trackingID,
+            assignedAt: new Date(),
+          },
+        },
+      },
+    );
+
+    if (parcelUpdate.modifiedCount > 0 && riderUpdate.modifiedCount > 0) {
+      res
+        .status(200)
+        .send({ success: true, message: "Rider assigned successfully" });
+    } else {
+      res.status(400).send({ message: "Assignment failed" });
+    }
+  } catch (error) {
+    res.status(500).send({ message: "Server error", error: error.message });
   }
 });
 
@@ -799,7 +892,6 @@ app.patch("/verify-payment", async (req, res) => {
       {
         $set: {
           deliveryChargeStatus: "paid",
-          deliveryStatus: "pending-pickup",
         },
       },
     );
