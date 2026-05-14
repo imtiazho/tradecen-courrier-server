@@ -46,6 +46,7 @@ let db,
   merchantsCollections,
   parcelsCollections,
   paymentCollections,
+  hubManagersCollection,
   trackingLogsCollections;
 
 async function connectDB() {
@@ -56,6 +57,7 @@ async function connectDB() {
       merchantsCollections,
       parcelsCollections,
       paymentCollections,
+      hubManagersCollection,
       trackingLogsCollections,
     };
 
@@ -66,6 +68,7 @@ async function connectDB() {
   merchantsCollections = db.collection("merchants");
   parcelsCollections = db.collection("parcels");
   paymentCollections = db.collection("payments");
+  hubManagersCollection = db.collection("hubManagers");
   trackingLogsCollections = db.collection("trackingLogs");
 
   return {
@@ -74,6 +77,7 @@ async function connectDB() {
     merchantsCollections,
     parcelsCollections,
     paymentCollections,
+    hubManagersCollection,
     trackingLogsCollections,
   };
 }
@@ -97,6 +101,7 @@ app.get("/users", async (req, res) => {
   try {
     const { userCollections } = await connectDB();
     const searchText = req.query.searchText;
+    const role = req.query.role;
 
     const query = {};
 
@@ -105,6 +110,10 @@ app.get("/users", async (req, res) => {
         { displayName: { $regex: searchText, $options: "i" } },
         { email: { $regex: searchText, $options: "i" } },
       ];
+    }
+
+    if (role) {
+      query.role = role;
     }
 
     const result = await userCollections
@@ -207,6 +216,79 @@ app.patch("/users/verify-status/:email", async (req, res) => {
   }
 });
 
+app.patch("/users/make-hub-manager", async (req, res) => {
+  try {
+    const data = req.body; // { email, region, district, hubName }
+    const { email, region, district, hubName } = data;
+
+    const userFilter = { email: email };
+    const updateRole = {
+      $set: { role: "hub-manager" },
+    };
+    const updateResult = await userCollections.updateOne(
+      userFilter,
+      updateRole,
+    );
+
+    if (updateResult.modifiedCount === 0) {
+      return res.status(404).send({
+        success: false,
+        message: "User not found or role already updated",
+      });
+    }
+
+    const userProfile = await userCollections.findOne({ email: email });
+
+    const hubManagerDoc = {
+      userId: userProfile._id,
+      name: userProfile.displayName,
+      email: email,
+      photoURL: userProfile.photoURL || "",
+      region: region,
+      district: district,
+      hubName: hubName,
+      assignedAt: new Date(),
+      status: "active",
+    };
+
+    const insertResult = await hubManagersCollection.insertOne(hubManagerDoc);
+
+    if (insertResult.insertedId) {
+      res.send({
+        success: true,
+        message: "User promoted and added to Hub Managers collection",
+      });
+    }
+  } catch (error) {
+    console.error("Error adding hub manager:", error);
+    res.status(500).send({ success: false, message: "Internal Server Error" });
+  }
+});
+
+/* ---- Managers ---- */
+app.get("/users/hub-managers", async (req, res) => {
+  try {
+    const { region, district } = req.query;
+
+    let query = {}; 
+
+    if (region) {
+      query.region = region;
+    }
+
+    if (district) {
+      query.district = district;
+    }
+
+    const result = await hubManagersCollection.find(query).toArray();
+
+    res.status(200).send(result);
+  } catch (error) {
+    console.error("Error fetching managers:", error);
+    res.status(500).send({ message: "Internal Server Error" });
+  }
+});
+
 /*---- Rider Related APIs Start ----*/
 app.post("/riders", async (req, res) => {
   try {
@@ -302,20 +384,43 @@ app.patch("/riders/:id", async (req, res) => {
 
 app.delete("/riders/:id", async (req, res) => {
   try {
-    const { ridersCollections } = await connectDB();
+    const { ridersCollections, usersCollection } = await connectDB();
     const id = req.params.id;
     const query = { _id: new ObjectId(id) };
 
-    const result = await ridersCollections.deleteOne(query);
+    const riderData = await ridersCollections.findOne(query);
 
-    if (result.deletedCount > 0) {
-      res.send(result);
-    } else {
-      res.status(404).send({ message: "Rider not found" });
+    if (!riderData) {
+      return res
+        .status(404)
+        .send({ success: false, message: "Rider request not found" });
+    }
+
+    const deleteResult = await ridersCollections.deleteOne(query);
+
+    if (deleteResult.deletedCount > 0) {
+      const userFilter = { email: riderData.email };
+      const userUpdate = {
+        $set: {
+          role: "user",
+        },
+      };
+
+      const userUpdateResult = await usersCollection.updateOne(
+        userFilter,
+        userUpdate,
+      );
+
+      res.send({
+        success: true,
+        message: "Rider request deleted and user role reset to user",
+        deleteResult,
+        userUpdateResult,
+      });
     }
   } catch (error) {
-    console.error("Error deleting rider:", error);
-    res.status(500).send({ message: "Internal Server Error" });
+    console.error("Error rejecting rider:", error);
+    res.status(500).send({ success: false, message: "Internal Server Error" });
   }
 });
 
