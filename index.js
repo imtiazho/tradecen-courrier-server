@@ -351,37 +351,14 @@ app.post("/riders", async (req, res) => {
   }
 });
 
-app.get("/riders", async (req, res) => {
-  try {
-    const { ridersCollections } = await connectDB();
-    const status = req.query.status;
-    let query = {};
-
-    if (status) {
-      query = { status: status };
-    }
-
-    const result = await ridersCollections.find(query).toArray();
-
-    res.status(200).send(result);
-  } catch (error) {
-    console.error("Error fetching riders:", error);
-    res.status(500).send({ message: "Internal Server Error" });
-  }
-});
-
 // app.get("/riders", async (req, res) => {
 //   try {
 //     const { ridersCollections } = await connectDB();
-//     const { status, workStatus } = req.query;
+//     const status = req.query.status;
 //     let query = {};
 
 //     if (status) {
-//       query.status = status;
-//     }
-
-//     if (workStatus) {
-//       query.workStatus = workStatus;
+//       query = { status: status };
 //     }
 
 //     const result = await ridersCollections.find(query).toArray();
@@ -392,6 +369,33 @@ app.get("/riders", async (req, res) => {
 //     res.status(500).send({ message: "Internal Server Error" });
 //   }
 // });
+
+app.get("/riders", async (req, res) => {
+  try {
+    const { ridersCollections } = await connectDB();
+    const { status, workStatus, email } = req.query;
+    let query = {};
+
+    if (status) {
+      query.status = status;
+    }
+
+    if (workStatus) {
+      query.workStatus = workStatus;
+    }
+
+    if (email) {
+      query.email = email;
+    }
+
+    const result = await ridersCollections.find(query).toArray();
+
+    res.status(200).send(result);
+  } catch (error) {
+    console.error("Error fetching riders:", error);
+    res.status(500).send({ message: "Internal Server Error" });
+  }
+});
 
 app.get("/riders/available/:areaName", async (req, res) => {
   try {
@@ -466,7 +470,9 @@ app.patch("/parcels/assign-rider", async (req, res) => {
     const { parcelId, riderId, riderName, riderEmail, riderPhone, trackingID } =
       req.body;
     const { parcelsCollections, ridersCollections } = await connectDB();
-
+    const parcelData = await parcelsCollections.findOne({
+      _id: new ObjectId(parcelId),
+    });
     const parcelUpdate = await parcelsCollections.updateOne(
       { _id: new ObjectId(parcelId) },
       {
@@ -490,6 +496,9 @@ app.patch("/parcels/assign-rider", async (req, res) => {
           activeTasks: {
             parcelId: new ObjectId(parcelId),
             trackingID: trackingID,
+            pickupLocation: parcelData.senderInfo.address,
+            merchantName: parcelData.senderInfo.name,
+            merchantPhone: parcelData.senderInfo.phone,
             assignedAt: new Date(),
           },
         },
@@ -505,6 +514,35 @@ app.patch("/parcels/assign-rider", async (req, res) => {
     }
   } catch (error) {
     res.status(500).send({ message: "Server error", error: error.message });
+  }
+});
+
+app.patch("/riders/complete-pickup/update", async (req, res) => {
+  try {
+    const { riderId, parcelId, trackingID } = req.body;
+    const { parcelsCollections, ridersCollections } = await connectDB();
+    
+    await parcelsCollections.updateOne(
+      { _id: new ObjectId(parcelId) },
+      { $set: { deliveryStatus: "reached-origin-warehouse" } }
+    );
+
+    // aro kaj ache like remove pickup rider
+
+    const result = await ridersCollections.updateOne(
+      { _id: new ObjectId(riderId) },
+      {
+        $inc: { currentTasks: -1 },
+        $pull: { activeTasks: { parcelId: new ObjectId(parcelId) } }
+      }
+    );
+
+    res.send({ success: true, result });
+    console.log(riderId, parcelId, trackingID);
+  } catch (error) {
+    res
+      .status(500)
+      .send({ message: "Error completing pickup", error: error.message });
   }
 });
 
