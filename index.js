@@ -266,11 +266,17 @@ app.patch("/users/make-hub-manager", async (req, res) => {
 });
 
 /* ---- Managers ---- */
-app.get("/users/hub-managers", async (req, res) => {
+app.get("/users/hub-managers/:email", async (req, res) => {
   try {
+    const email = req.params;
     const { region, district } = req.query;
 
-    let query = {}; 
+    let query = {};
+
+    if(email)
+    {
+      query.email = email;
+    }
 
     if (region) {
       query.region = region;
@@ -286,6 +292,33 @@ app.get("/users/hub-managers", async (req, res) => {
   } catch (error) {
     console.error("Error fetching managers:", error);
     res.status(500).send({ message: "Internal Server Error" });
+  }
+});
+
+app.get("/parcels/incoming/:hubName", async (req, res) => {
+  try {
+    const { parcelsCollections } = await connectDB();
+    const hubName = req.params.hubName;
+    const query = {
+      $or: [
+        {
+          "serviceCenters.origin": hubName,
+          deliveryStatus: "parcel-created",
+        },
+        {
+          "serviceCenters.destination": hubName,
+          deliveryStatus: "in-transit",
+        },
+      ],
+    };
+
+    const result = await parcelsCollections.find(query).toArray();
+    res.send(result);
+  } catch (error) {
+    res.status(500).send({
+      message: "Error fetching incoming parcels",
+      error: error.message,
+    });
   }
 });
 
