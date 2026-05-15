@@ -83,14 +83,20 @@ async function connectDB() {
 }
 
 /* ----- Helpers ------ */
-const logTracking = async (trackingID, status) => {
-  const { trackingLogsCollections } = await connectDB();
+const logTracking = async (parcel, status) => {
+  const { trackingLogsCollections, parcelsCollections } = await connectDB();
+
   const log = {
-    trackingID,
+    trackingID: parcel.trackingID,
+    parcelName: parcel.parcelName,
+    codAmount: parcel.codAmount,
+    merchantName: parcel.senderInfo.name,
+    receiverName: parcel.receiverInfo.name,
     deliveryStatus: status,
-    details: status.split("-").join(" "),
+    details: `${status.split("-").join(" ")} for this parcel.`,
     createdAt: new Date(),
   };
+
   return await trackingLogsCollections.insertOne(log);
 };
 
@@ -498,6 +504,8 @@ app.patch("/parcels/assign-rider", async (req, res) => {
     const parcelData = await parcelsCollections.findOne({
       _id: new ObjectId(parcelId),
     });
+    await logTracking(parcelData, "assign-pickup-rider");
+
     const parcelUpdate = await parcelsCollections.updateOne(
       { _id: new ObjectId(parcelId) },
       {
@@ -566,7 +574,7 @@ app.patch("/parcels/assign-delivery", async (req, res) => {
         },
       },
     );
-
+    await logTracking(parcelData, "assign-delivery-rider");
     const riderUpdate = await ridersCollections.updateOne(
       { _id: new ObjectId(riderId) },
       {
@@ -607,6 +615,11 @@ app.patch("/riders/complete-pickup/update", async (req, res) => {
       { $set: { deliveryStatus: "reached-origin-warehouse" } },
     );
 
+    const parcel = await parcelsCollections.findOne({
+      _id: new ObjectId(parcelId),
+    });
+    await logTracking(parcel, "reached-origin-warehouse");
+
     const result = await ridersCollections.updateOne(
       { _id: new ObjectId(riderId) },
       {
@@ -633,6 +646,11 @@ app.patch("/riders/complete-delivered/update", async (req, res) => {
       { _id: new ObjectId(parcelId) },
       { $set: { deliveryStatus: "delivered" } },
     );
+    const parcel = await parcelsCollections.findOne({
+      _id: new ObjectId(parcelId),
+    });
+
+    await logTracking(parcel, "delivered");
 
     const result = await ridersCollections.updateOne(
       { _id: new ObjectId(riderId) },
@@ -871,11 +889,12 @@ app.get("/parcels/stats/:email", async (req, res) => {
     };
 
     stats.forEach((element) => {
-      if (element._id === "parcel-created") formattedData.toPay = element.count;
-      if (element._id === "ready-to-pickup")
+      if (element.deliveryChargeStatus === "unpaid")
+        formattedData.toPay = element.count;
+      if (element._id === "assign-pickup-rider")
         formattedData.readyPickUp = element.count;
       if (element._id === "in-transit") formattedData.inTransit = element.count;
-      if (element._id === "ready-to-deliver")
+      if (element._id === "assign-delivery-rider")
         formattedData.readyDeliver = element.count;
       if (element._id === "delivered") formattedData.delivered = element.count;
     });
@@ -954,11 +973,29 @@ app.get("/merchant-parcels/:email", async (req, res) => {
   }
 });
 
+app.get("/tracking/:id", async (req, res) => {
+  try {
+    const { trackingLogsCollections } = await connectDB();
+    const result = await trackingLogsCollections
+      .find({ trackingID: req.params.id })
+      .sort({ createdAt: -1 })
+      .toArray();
+    res.status(200).send({
+      success: true,
+      result,
+    });
+  } catch (error) {
+    res.status(500).send({ message: "Error loading tracking logs" });
+  }
+});
+
 app.post("/parcels", async (req, res) => {
   try {
     const { parcelsCollections } = await connectDB();
     const newParcel = req.body;
-    await logTracking(newParcel.trackingID, newParcel.deliveryStatus);
+
+    await logTracking(newParcel, "parcel-created");
+
     const result = await parcelsCollections.insertOne(newParcel);
     res.send(result);
   } catch (error) {
@@ -988,11 +1025,14 @@ app.patch("/parcels/dispatch/:id", async (req, res) => {
       {
         $set: {
           deliveryStatus: "in-transit",
-          currentLocation: "Moving to Destination Hub",
+          currentLocation: "Origin Hub",
           updatedAt: new Date(),
         },
       },
     );
+
+    const parcel = await parcelsCollections.findOne({ _id: new ObjectId(id) });
+    await logTracking(parcel, "in-transit");
 
     if (result.modifiedCount > 0) {
       res.send({
@@ -1023,6 +1063,8 @@ app.patch("/parcels/hub/received/:id", async (req, res) => {
       },
     );
 
+    const parcel = await parcelsCollections.findOne({ _id: new ObjectId(id) });
+    await logTracking(parcel, "reached-destination-warehouse");
     if (result.modifiedCount > 0) {
       res.send({
         success: true,
