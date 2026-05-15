@@ -543,6 +543,60 @@ app.patch("/parcels/assign-rider", async (req, res) => {
   }
 });
 
+app.patch("/parcels/assign-delivery", async (req, res) => {
+  try {
+    const { parcelId, riderId, riderName, riderEmail, riderPhone, trackingID } =
+      req.body;
+    const { parcelsCollections, ridersCollections } = await connectDB();
+    const parcelData = await parcelsCollections.findOne({
+      _id: new ObjectId(parcelId),
+    });
+
+    const parcelUpdate = await parcelsCollections.updateOne(
+      { _id: new ObjectId(parcelId) },
+      {
+        $set: {
+          deliveryStatus: "assign-delivery-rider",
+          deliveryRider: {
+            id: riderId,
+            name: riderName,
+            email: riderEmail,
+            phone: riderPhone,
+          },
+        },
+      },
+    );
+
+    const riderUpdate = await ridersCollections.updateOne(
+      { _id: new ObjectId(riderId) },
+      {
+        $inc: { currentTasks: 1 },
+        $push: {
+          activeTasks: {
+            parcelId: new ObjectId(parcelId),
+            trackingID: trackingID,
+            deliveryLocation: parcelData.receiverInfo.address,
+            consumerName: parcelData.receiverInfo.name,
+            consumerPhone: parcelData.receiverInfo.phone,
+            taskType: "delivery",
+            assignedAt: new Date(),
+          },
+        },
+      },
+    );
+
+    if (parcelUpdate.modifiedCount > 0 && riderUpdate.modifiedCount > 0) {
+      res
+        .status(200)
+        .send({ success: true, message: "Rider assigned successfully" });
+    } else {
+      res.status(400).send({ message: "Assignment failed" });
+    }
+  } catch (error) {
+    res.status(500).send({ message: "Server error", error: error.message });
+  }
+});
+
 app.patch("/riders/complete-pickup/update", async (req, res) => {
   try {
     const { riderId, parcelId, trackingID } = req.body;
@@ -551,6 +605,33 @@ app.patch("/riders/complete-pickup/update", async (req, res) => {
     await parcelsCollections.updateOne(
       { _id: new ObjectId(parcelId) },
       { $set: { deliveryStatus: "reached-origin-warehouse" } },
+    );
+
+    const result = await ridersCollections.updateOne(
+      { _id: new ObjectId(riderId) },
+      {
+        $inc: { currentTasks: -1 },
+        $pull: { activeTasks: { parcelId: new ObjectId(parcelId) } },
+      },
+    );
+
+    res.send({ success: true, result });
+    console.log(riderId, parcelId, trackingID);
+  } catch (error) {
+    res
+      .status(500)
+      .send({ message: "Error completing pickup", error: error.message });
+  }
+});
+
+app.patch("/riders/complete-delivered/update", async (req, res) => {
+  try {
+    const { riderId, parcelId, trackingID } = req.body;
+    const { parcelsCollections, ridersCollections } = await connectDB();
+
+    await parcelsCollections.updateOne(
+      { _id: new ObjectId(parcelId) },
+      { $set: { deliveryStatus: "delivered" } },
     );
 
     const result = await ridersCollections.updateOne(
