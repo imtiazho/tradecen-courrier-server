@@ -84,7 +84,7 @@ async function connectDB() {
 
 /* ----- Helpers ------ */
 const logTracking = async (parcel, status) => {
-  const { trackingLogsCollections, parcelsCollections } = await connectDB();
+  const { trackingLogsCollections } = await connectDB();
 
   const log = {
     trackingID: parcel.trackingID,
@@ -810,6 +810,21 @@ app.get("/parcels", async (req, res) => {
   }
 });
 
+app.get("/late-invoices/:email", async (req, res) => {
+  try {
+    const { parcelsCollections } = await connectDB();
+    const lateInvoices = await parcelsCollections
+      .find({
+        "senderInfo.email": req.params.email,
+        deliveryChargeStatus: "unpaid",
+      })
+      .toArray();
+    res.send(lateInvoices);
+  } catch (error) {
+    res.status(500).send({ message: "Failed to fetch late invoices" });
+  }
+});
+
 app.get("/parcels/unpaid/:email", async (req, res) => {
   try {
     const { email } = req.params;
@@ -873,7 +888,10 @@ app.get("/parcels/stats/:email", async (req, res) => {
         },
         {
           $group: {
-            _id: "$deliveryStatus",
+            _id: {
+              deliveryStatus: "$deliveryStatus",
+              deliveryChargeStatus: "$deliveryChargeStatus",
+            },
             count: { $sum: 1 },
           },
         },
@@ -889,14 +907,16 @@ app.get("/parcels/stats/:email", async (req, res) => {
     };
 
     stats.forEach((element) => {
-      if (element.deliveryChargeStatus === "unpaid")
-        formattedData.toPay = element.count;
-      if (element._id === "assign-pickup-rider")
-        formattedData.readyPickUp = element.count;
-      if (element._id === "in-transit") formattedData.inTransit = element.count;
-      if (element._id === "assign-delivery-rider")
-        formattedData.readyDeliver = element.count;
-      if (element._id === "delivered") formattedData.delivered = element.count;
+      if (element._id.deliveryChargeStatus === "unpaid")
+        formattedData.toPay += element.count;
+      if (element._id.deliveryStatus === "assign-pickup-rider")
+        formattedData.readyPickUp += element.count;
+      if (element._id.deliveryStatus === "in-transit")
+        formattedData.inTransit += element.count;
+      if (element._id.deliveryStatus === "assign-delivery-rider")
+        formattedData.readyDeliver += element.count;
+      if (element._id.deliveryStatus === "delivered")
+        formattedData.delivered += element.count;
     });
 
     res.send(formattedData);
@@ -939,7 +959,7 @@ app.get("/revenue/stats/:email", async (req, res) => {
                 date: { $toDate: "$createdAt" },
               },
             },
-            totalRevenue: { $sum: "$cost" },
+            totalRevenue: { $sum: "$codAmount" },
           },
         },
         { $sort: { _id: 1 } },
