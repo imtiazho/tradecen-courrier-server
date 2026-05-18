@@ -762,6 +762,28 @@ app.get("/merchant/:email", async (req, res) => {
   }
 });
 
+app.patch("/merchant-update/:email", async (req, res) => {
+  try {
+    const { merchantsCollections } = await connectDB();
+    const updatedMerchantInfo = req.body;
+
+    const result = await merchantsCollections.updateOne(
+      { email: req.params.email },
+      { $set: updatedMerchantInfo },
+    );
+    if (result.modifiedCount > 0) {
+      res.send({
+        success: true,
+        message: "Merchant profile edited done",
+      });
+    } else {
+      res.status(404).send({ success: false, message: "Merchant not found" });
+    }
+  } catch (error) {
+    res.status(500).send({ success: false, error: "Internal Server Error" });
+  }
+});
+
 /*---- Parcels Related APIs ----*/
 app.get("/parcels", async (req, res) => {
   try {
@@ -817,6 +839,7 @@ app.get("/late-invoices/:email", async (req, res) => {
       .find({
         "senderInfo.email": req.params.email,
         deliveryChargeStatus: "unpaid",
+        deliveryStatus: "delivered",
       })
       .toArray();
     res.send(lateInvoices);
