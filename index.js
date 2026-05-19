@@ -47,7 +47,8 @@ let db,
   parcelsCollections,
   paymentCollections,
   hubManagersCollection,
-  trackingLogsCollections;
+  trackingLogsCollections,
+  payoutsCollections;
 
 async function connectDB() {
   if (db)
@@ -59,6 +60,7 @@ async function connectDB() {
       paymentCollections,
       hubManagersCollection,
       trackingLogsCollections,
+      payoutsCollections,
     };
 
   await client.connect();
@@ -70,6 +72,7 @@ async function connectDB() {
   paymentCollections = db.collection("payments");
   hubManagersCollection = db.collection("hubManagers");
   trackingLogsCollections = db.collection("trackingLogs");
+  payoutsCollections = db.collection("payoutsCollections");
 
   return {
     userCollections,
@@ -79,6 +82,7 @@ async function connectDB() {
     paymentCollections,
     hubManagersCollection,
     trackingLogsCollections,
+    payoutsCollections,
   };
 }
 
@@ -779,6 +783,62 @@ app.patch("/merchant-update/:email", async (req, res) => {
     } else {
       res.status(404).send({ success: false, message: "Merchant not found" });
     }
+  } catch (error) {
+    res.status(500).send({ success: false, error: "Internal Server Error" });
+  }
+});
+
+app.get("/payment-payout-summary/:email", async (req, res) => {
+  try {
+    const { parcelsCollections, payoutsCollections } = await connectDB();
+    const email = req.params.email;
+    const deliveredParcels = await parcelsCollections
+      .find({
+        "senderInfo.email": email,
+        deliveryStatus: "delivered",
+      })
+      .toArray();
+
+    // Total Rev
+    let totalRevenue = 0;
+    deliveredParcels.forEach((parcel) => {
+      const cod = parcel.codAmount;
+      const deliveryCharge = parcel.deliveryCharge;
+      parcel.deliveryChargeStatus === "paid"
+        ? (totalRevenue += cod)
+        : (totalRevenue += cod - deliveryCharge);
+    });
+
+    // Total Payout (Withdraw)
+    const completedPayouts = await payoutsCollections
+      .find({ email: email, payoutStatus: "Completed" })
+      .toArray();
+    const totalWithdrawn = completedPayouts.reduce(
+      (sum, p) => sum + p.amount,
+      0,
+    );
+
+    // Pending Payout / Withdraw
+    const pendingPayouts = await payoutsCollections.find({
+      email: email,
+      payoutStatus: "Pending",
+    }).toArray();
+    const totalPending = pendingPayouts.reduce((sum, p) => sum + p.amount, 0);
+
+    // Available Balance
+    const availableBalance = totalRevenue - (totalWithdrawn + totalPending);
+
+    const recentTransactions = await payoutsCollections
+      .find({ email: email })
+      .sort({ requestedAt: -1 })
+      .toArray();
+    res.send({
+      success: true,
+      totalRevenue,
+      totalWithdrawn,
+      totalPending,
+      availableBalance,
+    });
   } catch (error) {
     res.status(500).send({ success: false, error: "Internal Server Error" });
   }
