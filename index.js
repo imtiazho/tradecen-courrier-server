@@ -788,6 +788,7 @@ app.patch("/merchant-update/:email", async (req, res) => {
   }
 });
 
+/* ---- Payment Payout ---- */
 app.get("/payment-payout-summary/:email", async (req, res) => {
   try {
     const { parcelsCollections, payoutsCollections } = await connectDB();
@@ -796,6 +797,84 @@ app.get("/payment-payout-summary/:email", async (req, res) => {
       .find({
         "senderInfo.email": email,
         deliveryStatus: "delivered",
+        merchantRevenueStatus: null,
+      })
+      .toArray();
+
+    // Available Balance
+    let availableBalance = 0;
+    deliveredParcels.forEach((parcel) => {
+      const cod = parcel.codAmount;
+      const deliveryCharge = parcel.deliveryCharge;
+      parcel.deliveryChargeStatus === "paid"
+        ? (availableBalance += cod)
+        : (availableBalance += cod - deliveryCharge);
+    });
+
+    // Total Payout (Withdraw)
+    const completedPayouts = await payoutsCollections
+      .find({ email: email, payoutStatus: "completed" })
+      .toArray();
+    const totalWithdrawn = completedPayouts.reduce(
+      (sum, p) => sum + p.amount,
+      0,
+    );
+
+    // Pending Payout / Withdraw
+    const pendingPayouts = await payoutsCollections
+      .find({
+        email: email,
+        payoutStatus: "pending",
+      })
+      .toArray();
+    const totalPending = pendingPayouts.reduce(
+      (sum, p) => sum + (Number(p.amount) || 0),
+      0,
+    );
+
+    // recent Transaction
+    const recentTransactions = await payoutsCollections
+      .find({ email: email })
+      .sort({ requestedAt: -1 })
+      .toArray();
+
+    // Pending Transactions
+    const pendingTransactions = await payoutsCollections
+      .find({ email: email, payoutStatus: "pending" })
+      .sort({ requestedAt: -1 })
+      .toArray();
+
+    res.send({
+      success: true,
+      totalRevenue: availableBalance,
+      totalWithdrawn,
+      totalPending,
+      availableBalance,
+      deliveredParcels,
+      recentTransactions,
+      pendingTransactions,
+      completedPayouts,
+    });
+  } catch (error) {
+    res.status(500).send({ success: false, error: "Internal Server Error" });
+  }
+});
+
+app.post("/request-payout", async (req, res) => {
+  try {
+    const { parcelsCollections, paymentCollections } = await connectDB();
+    const { email, withdrawAmount, paymentMethod } = req.body;
+    if (!email || !withdrawAmount || withdrawAmount <= 0) {
+      return res
+        .status(400)
+        .send({ success: false, message: "Invalid request data" });
+    }
+
+    const deliveredParcels = await parcelsCollections
+      .find({
+        "senderInfo.email": email,
+        deliveryStatus: "delivered",
+        merchantRevenueStatus: null,
       })
       .toArray();
 
@@ -809,36 +888,51 @@ app.get("/payment-payout-summary/:email", async (req, res) => {
         : (totalRevenue += cod - deliveryCharge);
     });
 
-    // Total Payout (Withdraw)
-    const completedPayouts = await payoutsCollections
-      .find({ email: email, payoutStatus: "Completed" })
-      .toArray();
-    const totalWithdrawn = completedPayouts.reduce(
-      (sum, p) => sum + p.amount,
-      0,
-    );
+    if (withdrawAmount > totalRevenue) {
+      return res.status(400).send({
+        success: false,
+        message:
+          "Insufficient balance! You cannot withdraw more than your available balance.",
+      });
+    }
 
-    // Pending Payout / Withdraw
-    const pendingPayouts = await payoutsCollections.find({
-      email: email,
-      payoutStatus: "Pending",
-    }).toArray();
-    const totalPending = pendingPayouts.reduce((sum, p) => sum + p.amount, 0);
+    const baseParcelsInfo = deliveredParcels.map((parcel) => ({
+      parcelId: parcel._id,
+      codAmount: parcel.codAmount,
+      deliveryCharge: parcel.deliveryCharge,
+      merchantName: parcel.senderInfo?.name || "N/A",
+    }));
 
-    // Available Balance
-    const availableBalance = totalRevenue - (totalWithdrawn + totalPending);
+    const newPayoutRequest = {
+      email,
+      amount: Number(withdrawAmount),
+      payoutStatus: "pending",
+      method: paymentMethod?.type || "bKash",
+      accountNumber: paymentMethod?.number || "N/A",
+      requestedAt: new Date().toISOString(),
+      trxID: null,
+      parcelsBreakdown: baseParcelsInfo,
+    };
+    const result = await payoutsCollections.insertOne(newPayoutRequest);
+    if (result.insertedId) {
+      const parcelIds = baseParcelsInfo.map((p) => p.parcelId);
 
-    const recentTransactions = await payoutsCollections
-      .find({ email: email })
-      .sort({ requestedAt: -1 })
-      .toArray();
-    res.send({
-      success: true,
-      totalRevenue,
-      totalWithdrawn,
-      totalPending,
-      availableBalance,
-    });
+      await parcelsCollections.updateMany(
+        { _id: { $in: parcelIds } },
+        { $set: { merchantRevenueStatus: "pending" } },
+      );
+
+      res.send({
+        success: true,
+        message:
+          "Payout request submitted successfully. Waiting for admin approval.",
+        insertedId: result.insertedId,
+      });
+    } else {
+      res
+        .status(500)
+        .send({ success: false, message: "Failed to create payout request" });
+    }
   } catch (error) {
     res.status(500).send({ success: false, error: "Internal Server Error" });
   }
