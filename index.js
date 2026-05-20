@@ -938,6 +938,107 @@ app.post("/request-payout", async (req, res) => {
   }
 });
 
+app.patch("/approve-payout/:id", async (req, res) => {
+  try {
+    const { payoutsCollections, parcelsCollections } = await connectDB();
+    const payoutId = req.params.id;
+    const { status, trxID } = req.body;
+
+    const payoutRequest = await payoutsCollections.findOne({
+      _id: new ObjectId(payoutId),
+    });
+
+    if (!payoutRequest) {
+      return res
+        .status(404)
+        .send({ success: false, message: "Payout request not found" });
+    }
+
+    if (status === "Completed") {
+      if (!trxID) {
+        return res.status(400).send({
+          success: false,
+          message: "Transaction ID (TrxID) is required for completed payouts.",
+        });
+      }
+
+      await payoutsCollections.updateOne(
+        { _id: new ObjectId(payoutId) },
+        {
+          $set: {
+            payoutStatus: "completed",
+            trxID: trxID,
+            approvedAt: new Date().toISOString(),
+          },
+        },
+      );
+
+      const parcelIds = payoutRequest.parcelsBreakdown.map(
+        (p) => new ObjectId(p.parcelId),
+      );
+
+      await parcelsCollections.updateMany(
+        { _id: { $in: parcelIds } },
+        { $set: { merchantRevenueStatus: true } },
+      );
+
+      return res.send({
+        success: true,
+        message: "Payout approved and completed successfully!",
+      });
+    }
+
+    if (status === "Rejected") {
+      await payoutsCollections.updateOne(
+        { _id: new ObjectId(payoutId) },
+        {
+          $set: {
+            payoutStatus: "rejected",
+            rejectedAt: new Date().toISOString(),
+          },
+        },
+      );
+
+      const parcelIds = payoutRequest.parcelsBreakdown.map(
+        (p) => new ObjectId(p.parcelId),
+      );
+
+      await parcelsCollections.updateMany(
+        { _id: { $in: parcelIds } },
+        { $set: { merchantRevenueStatus: null } },
+      );
+
+      return res.send({
+        success: true,
+        message:
+          "Payout request rejected. Parcels released back to merchant balance.",
+      });
+    }
+    console.log(status, trxID);
+  } catch (error) {
+    console.error("Approval API Error:", error);
+    res.status(500).send({ success: false, error: "Internal Server Error" });
+  }
+});
+
+app.get("/all-payouts", async (req, res) => {
+  try {
+    const { payoutsCollections } = await connectDB();
+
+    const query = { payoutStatus: "pending" };
+
+    const result = await payoutsCollections
+      .find(query)
+      .sort({ requestedAt: -1 })
+      .toArray();
+
+    res.send({ success: true, data: result });
+  } catch (error) {
+    console.error("Get all payouts error:", error);
+    res.status(500).send({ success: false, error: "Internal Server Error" });
+  }
+});
+
 /*---- Parcels Related APIs ----*/
 app.get("/parcels", async (req, res) => {
   try {
