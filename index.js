@@ -979,7 +979,7 @@ app.patch("/approve-payout/:id", async (req, res) => {
 
       await parcelsCollections.updateMany(
         { _id: { $in: parcelIds } },
-        { $set: { merchantRevenueStatus: true } },
+        { $set: { merchantRevenueStatus: true, deliveryChargeStatus: "paid" } },
       );
 
       return res.send({
