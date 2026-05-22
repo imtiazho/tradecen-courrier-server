@@ -616,7 +616,12 @@ app.patch("/riders/complete-pickup/update", async (req, res) => {
 
     await parcelsCollections.updateOne(
       { _id: new ObjectId(parcelId) },
-      { $set: { deliveryStatus: "reached-origin-warehouse" } },
+      {
+        $set: {
+          deliveryStatus: "reached-origin-warehouse",
+          currentLocation: "Origin Warehouse",
+        },
+      },
     );
 
     const parcel = await parcelsCollections.findOne({
@@ -648,7 +653,7 @@ app.patch("/riders/complete-delivered/update", async (req, res) => {
 
     await parcelsCollections.updateOne(
       { _id: new ObjectId(parcelId) },
-      { $set: { deliveryStatus: "delivered" } },
+      { $set: { deliveryStatus: "delivered", currentLocation: "delivered" } },
     );
     const parcel = await parcelsCollections.findOne({
       _id: new ObjectId(parcelId),
@@ -1334,7 +1339,7 @@ app.patch("/parcels/dispatch/:id", async (req, res) => {
       {
         $set: {
           deliveryStatus: "in-transit",
-          currentLocation: "Origin Hub",
+          currentLocation: "Transport",
           updatedAt: new Date(),
         },
       },
