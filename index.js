@@ -1034,7 +1034,6 @@ app.get("/all-payouts", async (req, res) => {
 
     res.send({ success: true, data: result });
   } catch (error) {
-    console.error("Get all payouts error:", error);
     res.status(500).send({ success: false, error: "Internal Server Error" });
   }
 });
@@ -1084,6 +1083,18 @@ app.get("/parcels", async (req, res) => {
     res.send({ count, data: result });
   } catch (error) {
     res.status(500).send({ message: "Internal Server Error" });
+  }
+});
+
+app.get("/parcel/:parcelID", async (req, res) => {
+  try {
+    const { parcelsCollections } = await connectDB();
+    const parcel = await parcelsCollections.findOne({
+      _id: new ObjectId(req.params.parcelID),
+    });
+    res.send(parcel);
+  } catch (error) {
+    res.status(500).send({ success: false, error: "Internal Server Error" });
   }
 });
 
