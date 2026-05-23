@@ -427,7 +427,7 @@ app.post("/riders", async (req, res) => {
 app.get("/riders", async (req, res) => {
   try {
     const { ridersCollections } = await connectDB();
-    const { status, workStatus, email } = req.query;
+    const { status, workStatus, email, area } = req.query;
     let query = {};
 
     if (status) {
@@ -440,6 +440,10 @@ app.get("/riders", async (req, res) => {
 
     if (email) {
       query.email = email;
+    }
+
+    if (area) {
+      query.area = area;
     }
 
     const result = await ridersCollections.find(query).toArray();
@@ -668,7 +672,8 @@ app.patch("/riders/complete-pickup/update", async (req, res) => {
 app.patch("/riders/complete-delivered/update", async (req, res) => {
   try {
     const { riderId, parcelId, trackingID } = req.body;
-    const { parcelsCollections, ridersCollections } = await connectDB();
+    const { parcelsCollections, ridersCollections, merchantsCollections } =
+      await connectDB();
 
     await parcelsCollections.updateOne(
       { _id: new ObjectId(parcelId) },
@@ -677,6 +682,14 @@ app.patch("/riders/complete-delivered/update", async (req, res) => {
     const parcel = await parcelsCollections.findOne({
       _id: new ObjectId(parcelId),
     });
+
+    const merchantEmail = parcel.senderInfo.email;
+    if (merchantEmail) {
+      await merchantsCollections.updateOne(
+        { email: merchantEmail },
+        { $inc: { totalSuccessfulDeliveries: 1 } },
+      );
+    }
 
     await logTracking(parcel, "delivered");
 
@@ -740,6 +753,21 @@ app.delete("/riders/:id", async (req, res) => {
 });
 
 /* ---- Merchant APIs Start ---- */
+app.get("/area-merchant/:hubName", async (req, res) => {
+  try {
+    const { merchantsCollections } = await connectDB();
+    const { hubName } = req.params;
+    const result = await merchantsCollections
+      .find({
+        area: hubName,
+      })
+      .toArray();
+    res.send(result);
+  } catch (error) {
+    res.status(500).send({ success: false, error: "Internal Server Error" });
+  }
+});
+
 app.post("/merchants", async (req, res) => {
   try {
     const { merchantsCollections } = await connectDB();
