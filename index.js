@@ -315,14 +315,29 @@ app.get("/parcels/incoming/:hubName", async (req, res) => {
           deliveryStatus: "parcel-created",
         },
         {
-          "serviceCenters.origin": hubName,
-          deliveryStatus: "assign-pickup-rider",
-        },
-        {
           "serviceCenters.destination": hubName,
           deliveryStatus: "in-transit",
         },
       ],
+    };
+
+    const result = await parcelsCollections.find(query).toArray();
+    res.send(result);
+  } catch (error) {
+    res.status(500).send({
+      message: "Error fetching incoming parcels",
+      error: error.message,
+    });
+  }
+});
+
+app.get("/parcels/pickups/:hubName", async (req, res) => {
+  try {
+    const { parcelsCollections } = await connectDB();
+    const hubName = req.params.hubName;
+    const query = {
+      "serviceCenters.origin": hubName,
+      deliveryStatus: "picked-up",
     };
 
     const result = await parcelsCollections.find(query).toArray();
@@ -354,7 +369,11 @@ app.get("/warehouse/sorting-house/:hubName", async (req, res) => {
       })
       .toArray();
 
-    res.send({ dispatchList, deliveryList });
+    res.send({
+      dispatchList,
+      deliveryList,
+      total: dispatchList.length + deliveryList.length,
+    });
   } catch (error) {
     res.status(500).send({ message: "Error sorting parcels" });
   }
@@ -618,8 +637,8 @@ app.patch("/riders/complete-pickup/update", async (req, res) => {
       { _id: new ObjectId(parcelId) },
       {
         $set: {
-          deliveryStatus: "reached-origin-warehouse",
-          currentLocation: "Origin Warehouse",
+          deliveryStatus: "picked-up",
+          currentLocation: "Picked & On Way",
         },
       },
     );
@@ -627,7 +646,7 @@ app.patch("/riders/complete-pickup/update", async (req, res) => {
     const parcel = await parcelsCollections.findOne({
       _id: new ObjectId(parcelId),
     });
-    await logTracking(parcel, "reached-origin-warehouse");
+    await logTracking(parcel, "rider-carrying");
 
     const result = await ridersCollections.updateOne(
       { _id: new ObjectId(riderId) },
@@ -840,6 +859,7 @@ app.get("/payment-payout-summary/:email", async (req, res) => {
     // recent Transaction
     const recentTransactions = await payoutsCollections
       .find({ email: email })
+      .limit(5)
       .sort({ requestedAt: -1 })
       .toArray();
 
@@ -1361,7 +1381,7 @@ app.patch("/parcels/dispatch/:id", async (req, res) => {
   }
 });
 
-app.patch("/parcels/hub/received/:id", async (req, res) => {
+app.patch("/parcels/dest-hub/received/:id", async (req, res) => {
   try {
     const { id } = req.params;
     const { parcelsCollections } = await connectDB();
@@ -1379,6 +1399,37 @@ app.patch("/parcels/hub/received/:id", async (req, res) => {
 
     const parcel = await parcelsCollections.findOne({ _id: new ObjectId(id) });
     await logTracking(parcel, "reached-destination-warehouse");
+    if (result.modifiedCount > 0) {
+      res.send({
+        success: true,
+        message: "Parcel status updated to in-transit",
+      });
+    } else {
+      res.status(404).send({ success: false, message: "Parcel not found" });
+    }
+  } catch (error) {
+    res.status(500).send({ message: "Server Error", error: error.message });
+  }
+});
+
+app.patch("/parcels/origin-hub/received/:id", async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { parcelsCollections } = await connectDB();
+
+    const result = await parcelsCollections.updateOne(
+      { _id: new ObjectId(id) },
+      {
+        $set: {
+          deliveryStatus: "reached-origin-warehouse",
+          currentLocation: "origin-warehouse",
+          updatedAt: new Date(),
+        },
+      },
+    );
+
+    const parcel = await parcelsCollections.findOne({ _id: new ObjectId(id) });
+    await logTracking(parcel, "reached-origin-warehouse");
     if (result.modifiedCount > 0) {
       res.send({
         success: true,
