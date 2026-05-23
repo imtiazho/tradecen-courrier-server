@@ -315,6 +315,11 @@ app.get("/parcels/incoming/:hubName", async (req, res) => {
           deliveryStatus: "parcel-created",
         },
         {
+          "serviceCenters.origin": hubName,
+          deliveryStatus: "assign-pickup-rider",
+        },
+
+        {
           "serviceCenters.destination": hubName,
           deliveryStatus: "in-transit",
         },
