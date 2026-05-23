@@ -399,6 +399,24 @@ app.get("/parcels/out-for-delivery/:hubName", async (req, res) => {
     res.status(500).send({ message: "Error out for delivery parcels" });
   }
 });
+app.get("/parcels/hub-delivered/:hubName", async (req, res) => {
+  try {
+    const { parcelsCollections } = await connectDB();
+    const { hubName } = req.params;
+    const query = {
+      "serviceCenters.destination": hubName,
+      deliveryStatus: "delivered",
+    };
+
+    const result = await parcelsCollections
+      .find(query)
+      .sort({ createdAt: -1 })
+      .toArray();
+    res.send(result);
+  } catch (error) {
+    res.status(500).send({ message: "Error out for delivery parcels" });
+  }
+});
 
 /*---- Rider Related APIs Start ----*/
 app.post("/riders", async (req, res) => {
