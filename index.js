@@ -1651,38 +1651,40 @@ app.get("/hub-efficiency-flow/:hubName", async (req, res) => {
     const sevenDaysAgo = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
     const sevenDayAgoStr = sevenDaysAgo.toISOString();
 
-    const parcels = await parcelsCollections
-      .find({
-        $or: [
-          { "serviceCenters.origin": hubName },
-          { "serviceCenters.destination": hubName },
-        ],
-        createdAt: { $gte: sevenDayAgoStr },
-      })
-      .toArray();
+    const sortingCount = await parcelsCollections.countDocuments({
+      createdAt: { $gte: sevenDayAgoStr },
+      $or: [
+        {
+          "serviceCenters.origin": hubName,
+          deliveryStatus: "reached-origin-warehouse",
+        },
+        {
+          "serviceCenters.destination": hubName,
+          deliveryStatus: "reached-destination-warehouse",
+        },
+      ],
+    });
 
-    const total = parcels.length;
-    if (total === 0) {
-      return res.send({ sorting: 0, transit: 0, delivered: 0, totalActive: 0 });
-    }
+    const transitCount = await parcelsCollections.countDocuments({
+      $or: [
+        { "serviceCenters.origin": hubName },
+        { "serviceCenters.destination": hubName },
+      ],
+      createdAt: { $gte: sevenDayAgoStr },
+      deliveryStatus: "in-transit",
+    });
 
-    const sortingCount = parcels.filter((p) =>
-      ["reached-origin-warehouse", "reached-destination-warehouse"].includes(
-        p.deliveryStatus,
-      ),
-    ).length;
+    const deliveredCount = await parcelsCollections.countDocuments({
+      "serviceCenters.destination": hubName,
+      createdAt: { $gte: sevenDayAgoStr },
+      deliveryStatus: "delivered",
+    });
 
-    const transitCount = parcels.filter(
-      (p) => p.deliveryStatus === "in-transit",
-    ).length;
+    const total = sortingCount + transitCount + deliveredCount;
 
-    const deliveredCount = parcels.filter(
-      (p) => p.deliveryStatus === "delivered",
-    ).length;
-
-    const sorting = Math.round((sortingCount / total) * 100);
-    const transit = Math.round((transitCount / total) * 100);
-    const delivered = Math.round((deliveredCount / total) * 100);
+    const sorting = Math.round((sortingCount / total) * 100) || 0;
+    const transit = Math.round((transitCount / total) * 100) || 0;
+    const delivered = Math.round((deliveredCount / total) * 100) || 0;
 
     res.send({ sorting, transit, delivered, totalActive: total });
   } catch (error) {
