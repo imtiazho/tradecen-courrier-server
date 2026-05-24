@@ -1569,11 +1569,13 @@ app.get("/hub-profit-metrics/:hubName", async (req, res) => {
     const { hubName } = req.params;
     const { parcelsCollections } = await connectDB();
 
-    const parcels = await parcelsCollections.find({
-      "serviceCenters.destination": hubName,
-      deliveryStatus: "delivered",
-      isDepositedToHQ: false,
-    }).toArray();
+    const parcels = await parcelsCollections
+      .find({
+        "serviceCenters.destination": hubName,
+        deliveryStatus: "delivered",
+        isDepositedToHQ: false,
+      })
+      .toArray();
 
     let hqPayableProfit = 0;
     let payableParcelCount = 0;
@@ -1589,11 +1591,101 @@ app.get("/hub-profit-metrics/:hubName", async (req, res) => {
       success: true,
       hubName,
       totalParcelCount: payableParcelCount,
-      hqPayableProfit
+      hqPayableProfit,
+    });
+  } catch (error) {
+    res.status(500).send({ success: false, message: "Internal Server Error" });
+  }
+});
+
+app.get("/hub-aging-status/:hubName", async (req, res) => {
+  try {
+    const { parcelsCollections } = await connectDB();
+    const { hubName } = req.params;
+    const activeParcels = await parcelsCollections
+      .find({
+        $or: [
+          { "serviceCenters.origin": hubName },
+          { "serviceCenters.destination": hubName },
+        ],
+
+        deliveryStatus: {
+          $in: ["reached-origin-warehouse", "reached-destination-warehouse"],
+        },
+      })
+      .toArray();
+
+    let age24H = 0;
+    let age48H = 0;
+    let age72HPlus = 0;
+
+    const now = new Date();
+
+    activeParcels.forEach((parcel) => {
+      if (parcel.createdAt) {
+        const createdTime = new Date(parcel.createdAt);
+        const diffInHours = (now - createdTime) / (1000 * 60 * 60);
+
+        if (diffInHours <= 24) {
+          age24H++;
+        } else if (diffInHours > 24 && diffInHours <= 48) {
+          age48H++;
+        } else {
+          age72HPlus++;
+        }
+      }
     });
 
+    res.send({ age24H, age48H, age72HPlus });
   } catch (error) {
-    console.error("Finance metrics error:", error);
+    res.status(500).send({ success: false, message: "Internal Server Error" });
+  }
+});
+
+app.get("/hub-efficiency-flow/:hubName", async (req, res) => {
+  try {
+    const { parcelsCollections } = await connectDB();
+    const { hubName } = req.params;
+
+    const now = new Date();
+    const sevenDaysAgo = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
+    const sevenDayAgoStr = sevenDaysAgo.toISOString();
+
+    const parcels = await parcelsCollections
+      .find({
+        $or: [
+          { "serviceCenters.origin": hubName },
+          { "serviceCenters.destination": hubName },
+        ],
+        createdAt: { $gte: sevenDayAgoStr },
+      })
+      .toArray();
+
+    const total = parcels.length;
+    if (total === 0) {
+      return res.send({ sorting: 0, transit: 0, delivered: 0, totalActive: 0 });
+    }
+
+    const sortingCount = parcels.filter((p) =>
+      ["reached-origin-warehouse", "reached-destination-warehouse"].includes(
+        p.deliveryStatus,
+      ),
+    ).length;
+
+    const transitCount = parcels.filter(
+      (p) => p.deliveryStatus === "in-transit",
+    ).length;
+
+    const deliveredCount = parcels.filter(
+      (p) => p.deliveryStatus === "delivered",
+    ).length;
+
+    const sorting = Math.round((sortingCount / total) * 100);
+    const transit = Math.round((transitCount / total) * 100);
+    const delivered = Math.round((deliveredCount / total) * 100);
+
+    res.send({ sorting, transit, delivered, totalActive: total });
+  } catch (error) {
     res.status(500).send({ success: false, message: "Internal Server Error" });
   }
 });
