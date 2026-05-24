@@ -1665,13 +1665,10 @@ app.get("/hub-efficiency-flow/:hubName", async (req, res) => {
       ],
     });
 
-    const transitCount = await parcelsCollections.countDocuments({
-      $or: [
-        { "serviceCenters.origin": hubName },
-        { "serviceCenters.destination": hubName },
-      ],
+    const OutForDeliveryCount = await parcelsCollections.countDocuments({
+      "serviceCenters.destination": hubName,
       createdAt: { $gte: sevenDayAgoStr },
-      deliveryStatus: "in-transit",
+      deliveryStatus: "assign-delivery-rider",
     });
 
     const deliveredCount = await parcelsCollections.countDocuments({
@@ -1680,13 +1677,13 @@ app.get("/hub-efficiency-flow/:hubName", async (req, res) => {
       deliveryStatus: "delivered",
     });
 
-    const total = sortingCount + transitCount + deliveredCount;
+    const total = sortingCount + OutForDeliveryCount + deliveredCount;
 
     const sorting = Math.round((sortingCount / total) * 100) || 0;
-    const transit = Math.round((transitCount / total) * 100) || 0;
+    const outDelivery = Math.round((OutForDeliveryCount / total) * 100) || 0;
     const delivered = Math.round((deliveredCount / total) * 100) || 0;
 
-    res.send({ sorting, transit, delivered, totalActive: total });
+    res.send({ sorting, outDelivery, delivered, totalActive: total });
   } catch (error) {
     res.status(500).send({ success: false, message: "Internal Server Error" });
   }
