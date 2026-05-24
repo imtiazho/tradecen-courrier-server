@@ -1510,6 +1510,94 @@ app.patch("/parcels/origin-hub/received/:id", async (req, res) => {
   }
 });
 
+app.get("/hub-hand-cash/:hubName", async (req, res) => {
+  try {
+    const { parcelsCollections } = await connectDB();
+    const { hubName } = req.params;
+
+    const result = await parcelsCollections
+      .aggregate([
+        {
+          $match: {
+            "serviceCenters.destination": hubName,
+            deliveryStatus: "delivered",
+            merchantRevenueStatus: null,
+          },
+        },
+        {
+          $group: {
+            _id: "$serviceCenters.destination",
+            totalParcelCount: { $sum: 1 },
+            totalHandCash: { $sum: "$codAmount" },
+          },
+        },
+        {
+          $project: {
+            _id: 0,
+            hubName: "$_id",
+            totalParcelCount: 1,
+            totalHandCash: 1,
+          },
+        },
+      ])
+      .toArray();
+
+    if (result.length === 0) {
+      return res.send({
+        success: true,
+        hubName: hubName,
+        totalParcelCount: 0,
+        totalHandCash: 0,
+      });
+    }
+
+    res.send({
+      success: true,
+      ...result[0],
+    });
+  } catch (error) {
+    res.status(500).send({
+      success: false,
+      message: "Internal Server Error",
+      error: error.message,
+    });
+  }
+});
+
+app.get("/hub-profit-metrics/:hubName", async (req, res) => {
+  try {
+    const { hubName } = req.params;
+    const { parcelsCollections } = await connectDB();
+
+    const parcels = await parcelsCollections.find({
+      "serviceCenters.destination": hubName,
+      deliveryStatus: "delivered",
+      isDepositedToHQ: false,
+    }).toArray();
+
+    let hqPayableProfit = 0;
+    let payableParcelCount = 0;
+
+    parcels.forEach((parcel) => {
+      if (parcel.deliveryChargeStatus !== "paid") {
+        hqPayableProfit += parcel.deliveryCharge || 0;
+        payableParcelCount += 1;
+      }
+    });
+
+    res.send({
+      success: true,
+      hubName,
+      totalParcelCount: payableParcelCount,
+      hqPayableProfit
+    });
+
+  } catch (error) {
+    console.error("Finance metrics error:", error);
+    res.status(500).send({ success: false, message: "Internal Server Error" });
+  }
+});
+
 // Health check
 app.get("/", (req, res) => {
   res.send("🚀 TradeCen Server Running");
