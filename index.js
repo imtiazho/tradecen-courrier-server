@@ -888,7 +888,7 @@ app.get("/payment-payout-summary/:email", async (req, res) => {
       .find({
         "senderInfo.email": email,
         deliveryStatus: "delivered",
-        merchantRevenueStatus: null,
+        merchantRevenueStatus: false,
       })
       .toArray();
 
@@ -966,7 +966,7 @@ app.post("/request-payout", async (req, res) => {
       .find({
         "senderInfo.email": email,
         deliveryStatus: "delivered",
-        merchantRevenueStatus: null,
+        merchantRevenueStatus: false,
       })
       .toArray();
 
@@ -1512,55 +1512,39 @@ app.patch("/parcels/origin-hub/received/:id", async (req, res) => {
 
 app.get("/hub-hand-cash/:hubName", async (req, res) => {
   try {
-    const { parcelsCollections } = await connectDB();
     const { hubName } = req.params;
+    const { parcelsCollections } = await connectDB();
 
-    const result = await parcelsCollections
-      .aggregate([
-        {
-          $match: {
-            "serviceCenters.destination": hubName,
-            deliveryStatus: "delivered",
-            merchantRevenueStatus: null,
-          },
-        },
-        {
-          $group: {
-            _id: "$serviceCenters.destination",
-            totalParcelCount: { $sum: 1 },
-            totalHandCash: { $sum: "$codAmount" },
-          },
-        },
-        {
-          $project: {
-            _id: 0,
-            hubName: "$_id",
-            totalParcelCount: 1,
-            totalHandCash: 1,
-          },
-        },
-      ])
+    const parcels = await parcelsCollections
+      .find({
+        "serviceCenters.destination": hubName,
+        deliveryStatus: "delivered",
+        isDepositedToHQ: false,
+      })
       .toArray();
 
-    if (result.length === 0) {
-      return res.send({
-        success: true,
-        hubName: hubName,
-        totalParcelCount: 0,
-        totalHandCash: 0,
-      });
-    }
+    let totalHandCash = 0;
+    const totalParcelCount = parcels.length;
+
+    parcels.forEach((parcel) => {
+      const isPayoutPending = [false, "pending"].includes(parcel.merchantRevenueStatus);
+
+      if (isPayoutPending) {
+        totalHandCash += parcel.codAmount || 0;
+      } else if (!parcel.deliveryChargeOnlinePaymentStatus) {
+        totalHandCash += parcel.deliveryCharge || 0;
+      }
+    });
 
     res.send({
       success: true,
-      ...result[0],
+      hubName,
+      totalParcelCount,
+      totalHandCash,
     });
+
   } catch (error) {
-    res.status(500).send({
-      success: false,
-      message: "Internal Server Error",
-      error: error.message,
-    });
+    res.status(500).send({ success: false, message: "Internal Server Error", error: error.message });
   }
 });
 
@@ -1581,7 +1565,7 @@ app.get("/hub-profit-metrics/:hubName", async (req, res) => {
     let payableParcelCount = 0;
 
     parcels.forEach((parcel) => {
-      if (parcel.deliveryChargeStatus !== "paid") {
+      if (!parcel.deliveryChargeOnlinePaymentStatus) {
         hqPayableProfit += parcel.deliveryCharge || 0;
         payableParcelCount += 1;
       }
@@ -1746,6 +1730,7 @@ app.patch("/verify-payment", async (req, res) => {
       {
         $set: {
           deliveryChargeStatus: "paid",
+          deliveryChargeOnlinePaymentStatus: true,
         },
       },
     );
