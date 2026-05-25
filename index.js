@@ -86,7 +86,7 @@ async function connectDB() {
     hubManagersCollection,
     trackingLogsCollections,
     payoutsCollections,
-    hqPaymentsCollections
+    hqPaymentsCollections,
   };
 }
 
@@ -1550,13 +1550,11 @@ app.get("/hub-hand-cash/:hubName", async (req, res) => {
       totalHandCash,
     });
   } catch (error) {
-    res
-      .status(500)
-      .send({
-        success: false,
-        message: "Internal Server Error",
-        error: error.message,
-      });
+    res.status(500).send({
+      success: false,
+      message: "Internal Server Error",
+      error: error.message,
+    });
   }
 });
 
@@ -1689,19 +1687,19 @@ app.post("/deposit-HQ/:hubName", async (req, res) => {
   try {
     const { hubName } = req.params;
     const { hqPaymentsCollections, parcelsCollections } = await connectDB();
-    
-    const { 
-      depositedAmount, 
-      parcelIds, 
-      paymentMethod, 
+
+    const {
+      depositedAmount,
+      parcelIds,
+      paymentMethod,
       transactionDetails,
-      submittedBy 
+      submittedBy,
     } = req.body;
 
     if (!depositedAmount || !parcelIds || parcelIds.length === 0) {
-      return res.status(400).send({ 
-        success: false, 
-        message: "Missing required fields: depositedAmount or parcelIds" 
+      return res.status(400).send({
+        success: false,
+        message: "Missing required fields: depositedAmount or parcelIds",
       });
     }
 
@@ -1715,44 +1713,59 @@ app.post("/deposit-HQ/:hubName", async (req, res) => {
       status: "pending",
       submittedBy: submittedBy || "Hub Manager",
       createdAt: new Date().toISOString(),
-      updatedAt: new Date().toISOString()
+      updatedAt: new Date().toISOString(),
     };
 
     const insertResult = await hqPaymentsCollections.insertOne(depositInvoice);
 
     if (insertResult.insertedId) {
-      const objectIdArray = parcelIds.map(id => new ObjectId(id));
+      const objectIdArray = parcelIds.map((id) => new ObjectId(id));
 
       await parcelsCollections.updateMany(
         { _id: { $in: objectIdArray } },
-        { 
-          $set: { 
-            depositRequestStatus: "submitted", 
-            hqPaymentInvoiceId: insertResult.insertedId
-          } 
-        }
+        {
+          $set: {
+            depositRequestStatus: "submitted",
+            hqPaymentInvoiceId: insertResult.insertedId,
+          },
+        },
       );
     }
 
     res.status(201).send({
       success: true,
       message: "Deposit request submitted to HQ successfully!",
-      depositId: insertResult.insertedId
+      depositId: insertResult.insertedId,
     });
-
   } catch (error) {
     console.error("Deposit HQ Error:", error);
-    res.status(500).send({ success: false, message: "Internal Server Error", error: error.message });
+    res
+      .status(500)
+      .send({
+        success: false,
+        message: "Internal Server Error",
+        error: error.message,
+      });
   }
 });
 
-app.get("/hub-deposit-history/:hubName", async (req, res) => {
+app.get("/hub-deposit-history", async (req, res) => {
   try {
-    const { hubName } = req.params;
+    const { hubName, status } = req.query;
     const { hqPaymentsCollections } = await connectDB();
 
+    const query = {};
+
+    if (hubName) {
+      query.hubName = hubName;
+    }
+
+    if (status) {
+      query.status = status;
+    }
+
     const depositHistory = await hqPaymentsCollections
-      .find({ hubName: hubName })
+      .find(query)
       .sort({ createdAt: -1 })
       .toArray();
 
@@ -1762,13 +1775,31 @@ app.get("/hub-deposit-history/:hubName", async (req, res) => {
       totalDeposits: depositHistory.length,
       history: depositHistory,
     });
-    
   } catch (error) {
     res.status(500).send({ success: false, message: "Internal Server Error" });
   }
 });
 
+app.patch("/approve-deposit/:id", async (req, res) => {
+  const { id } = req.params;
+  const { hqPaymentsCollections, parcelsCollections } = await connectDB();
 
+  const invoice = await hqPaymentsCollections.findOne({
+    _id: new ObjectId(id),
+  });
+
+  await hqPaymentsCollections.updateOne(
+    { _id: new ObjectId(id) },
+    { $set: { status: "approved", approvedAt: new Date().toISOString() } },
+  );
+
+  await parcelsCollections.updateMany(
+    { _id: { $in: invoice.parcelIds } },
+    { $set: { isDepositedToHQ: true, depositRequestStatus: "approved" } },
+  );
+
+  res.send({ success: true, message: "Deposit approved successfully!" });
+});
 
 // Health check
 app.get("/", (req, res) => {
