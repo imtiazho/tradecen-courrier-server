@@ -48,7 +48,8 @@ let db,
   paymentCollections,
   hubManagersCollection,
   trackingLogsCollections,
-  payoutsCollections;
+  payoutsCollections,
+  hqPaymentsCollections;
 
 async function connectDB() {
   if (db)
@@ -61,6 +62,7 @@ async function connectDB() {
       hubManagersCollection,
       trackingLogsCollections,
       payoutsCollections,
+      hqPaymentsCollections,
     };
 
   await client.connect();
@@ -73,6 +75,7 @@ async function connectDB() {
   hubManagersCollection = db.collection("hubManagers");
   trackingLogsCollections = db.collection("trackingLogs");
   payoutsCollections = db.collection("payoutsCollections");
+  hqPaymentsCollections = db.collection("hqPaymentsCollections");
 
   return {
     userCollections,
@@ -83,6 +86,7 @@ async function connectDB() {
     hubManagersCollection,
     trackingLogsCollections,
     payoutsCollections,
+    hqPaymentsCollections
   };
 }
 
@@ -1527,7 +1531,9 @@ app.get("/hub-hand-cash/:hubName", async (req, res) => {
     const totalParcelCount = parcels.length;
 
     parcels.forEach((parcel) => {
-      const isPayoutPending = [false, "pending"].includes(parcel.merchantRevenueStatus);
+      const isPayoutPending = [false, "pending"].includes(
+        parcel.merchantRevenueStatus,
+      );
 
       if (isPayoutPending) {
         totalHandCash += parcel.codAmount || 0;
@@ -1538,13 +1544,19 @@ app.get("/hub-hand-cash/:hubName", async (req, res) => {
 
     res.send({
       success: true,
+      parcels,
       hubName,
       totalParcelCount,
       totalHandCash,
     });
-
   } catch (error) {
-    res.status(500).send({ success: false, message: "Internal Server Error", error: error.message });
+    res
+      .status(500)
+      .send({
+        success: false,
+        message: "Internal Server Error",
+        error: error.message,
+      });
   }
 });
 
@@ -1672,6 +1684,91 @@ app.get("/hub-efficiency-flow/:hubName", async (req, res) => {
     res.status(500).send({ success: false, message: "Internal Server Error" });
   }
 });
+
+app.post("/deposit-HQ/:hubName", async (req, res) => {
+  try {
+    const { hubName } = req.params;
+    const { hqPaymentsCollections, parcelsCollections } = await connectDB();
+    
+    const { 
+      depositedAmount, 
+      parcelIds, 
+      paymentMethod, 
+      transactionDetails,
+      submittedBy 
+    } = req.body;
+
+    if (!depositedAmount || !parcelIds || parcelIds.length === 0) {
+      return res.status(400).send({ 
+        success: false, 
+        message: "Missing required fields: depositedAmount or parcelIds" 
+      });
+    }
+
+    const depositInvoice = {
+      hubName,
+      depositedAmount,
+      totalParcelsCovered: parcelIds.length,
+      parcelIds,
+      paymentMethod: paymentMethod || "CASH",
+      transactionDetails: transactionDetails || {},
+      status: "pending",
+      submittedBy: submittedBy || "Hub Manager",
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString()
+    };
+
+    const insertResult = await hqPaymentsCollections.insertOne(depositInvoice);
+
+    if (insertResult.insertedId) {
+      const objectIdArray = parcelIds.map(id => new ObjectId(id));
+
+      await parcelsCollections.updateMany(
+        { _id: { $in: objectIdArray } },
+        { 
+          $set: { 
+            depositRequestStatus: "submitted", 
+            hqPaymentInvoiceId: insertResult.insertedId
+          } 
+        }
+      );
+    }
+
+    res.status(201).send({
+      success: true,
+      message: "Deposit request submitted to HQ successfully!",
+      depositId: insertResult.insertedId
+    });
+
+  } catch (error) {
+    console.error("Deposit HQ Error:", error);
+    res.status(500).send({ success: false, message: "Internal Server Error", error: error.message });
+  }
+});
+
+app.get("/hub-deposit-history/:hubName", async (req, res) => {
+  try {
+    const { hubName } = req.params;
+    const { hqPaymentsCollections } = await connectDB();
+
+    const depositHistory = await hqPaymentsCollections
+      .find({ hubName: hubName })
+      .sort({ createdAt: -1 })
+      .toArray();
+
+    res.send({
+      success: true,
+      hubName,
+      totalDeposits: depositHistory.length,
+      history: depositHistory,
+    });
+    
+  } catch (error) {
+    res.status(500).send({ success: false, message: "Internal Server Error" });
+  }
+});
+
+
 
 // Health check
 app.get("/", (req, res) => {
