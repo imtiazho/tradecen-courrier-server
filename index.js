@@ -1781,24 +1781,30 @@ app.get("/hub-deposit-history", async (req, res) => {
 });
 
 app.patch("/approve-deposit/:id", async (req, res) => {
-  const { id } = req.params;
+  try {
+    const { id } = req.params;
   const { hqPaymentsCollections, parcelsCollections } = await connectDB();
 
   const invoice = await hqPaymentsCollections.findOne({
     _id: new ObjectId(id),
   });
-
+  const objectParcelIds = invoice.parcelIds.map(id => new ObjectId(id));
+  
   await hqPaymentsCollections.updateOne(
     { _id: new ObjectId(id) },
     { $set: { status: "approved", approvedAt: new Date().toISOString() } },
   );
-
+  
   await parcelsCollections.updateMany(
-    { _id: { $in: invoice.parcelIds } },
+    { _id: { $in: objectParcelIds } },
     { $set: { isDepositedToHQ: true, depositRequestStatus: "approved" } },
   );
 
   res.send({ success: true, message: "Deposit approved successfully!" });
+  } catch (error) {
+    res.status(500).send({ success: false, message: "Internal Server Error" });
+  }
+  
 });
 
 // Health check
