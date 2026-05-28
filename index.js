@@ -745,7 +745,6 @@ app.patch("/riders/complete-delivered/update", async (req, res) => {
     );
 
     res.send({ success: true, result });
-    console.log(riderId, parcelId, trackingID);
   } catch (error) {
     res
       .status(500)
@@ -1110,7 +1109,6 @@ app.patch("/approve-payout/:id", async (req, res) => {
           "Payout request rejected. Parcels released back to merchant balance.",
       });
     }
-    console.log(status, trxID);
   } catch (error) {
     console.error("Approval API Error:", error);
     res.status(500).send({ success: false, error: "Internal Server Error" });
@@ -1585,9 +1583,11 @@ app.get("/hub-profit-metrics/:hubName", async (req, res) => {
       success: true,
       hubName,
       totalParcelCount: payableParcelCount,
-      hqPayableProfit,
+      hqPayableProfit, 
     });
+
   } catch (error) {
+    console.error("Hub Profit Metrics Error:", error);
     res.status(500).send({ success: false, message: "Internal Server Error" });
   }
 });
