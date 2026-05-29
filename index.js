@@ -423,6 +423,59 @@ app.get("/parcels/hub-delivered/:hubName", async (req, res) => {
 });
 
 /*---- Rider Related APIs Start ----*/
+app.get("/rider/:email", async (req, res) => {
+  try {
+    const { ridersCollections, parcelsCollections } = await connectDB();
+    const email = req.params.email;
+    const riderData = await ridersCollections.findOne({ email: email });
+    if (!riderData) {
+      return res
+        .status(404)
+        .send({ success: false, message: "Rider not found in TradeCen" });
+    }
+
+    const assignedParcels = riderData.activeTasks;
+    const holdUpParcels = riderData.activeTasks.filter(
+      (parcel) => parcel.isHold === true,
+    );
+
+    const startOfToday = new Date(); // 12.00 Morning
+    startOfToday.setHours(0, 0, 0, 0);
+    const endOfToday = new Date(); // 11.59 Night
+    endOfToday.setHours(23, 59, 59, 999);
+
+    const deliveredParcels = await parcelsCollections
+      .find({
+        "deliveryRider.email": email,
+        deliveryStatus: "delivered",
+        deliveredAt: {
+          $gte: startOfToday,
+          $lte: endOfToday,
+        },
+      })
+      .toArray();
+
+    const totalCollectedAmount =
+      deliveredParcels.length > 0
+        ? deliveredParcels.reduce(
+            (total, parcel) => total + (Number(parcel.codAmount) || 0),
+            0,
+          )
+        : 0;
+
+    res.send({
+      success: true,
+      riderData,
+      assignedParcels,
+      holdUpParcels,
+      deliveredParcels,
+      totalCollectedAmount,
+    });
+  } catch (error) {
+    res.status(500).send({ success: false, message: "Internal Server Error" });
+  }
+});
+
 app.post("/riders", async (req, res) => {
   try {
     const { ridersCollections } = await connectDB();
@@ -658,6 +711,7 @@ app.patch("/parcels/assign-delivery", async (req, res) => {
             consumerPhone: parcelData.receiverInfo.phone,
             taskType: "delivery",
             assignedAt: new Date(),
+            isHold: false,
           },
         },
       },
@@ -720,7 +774,13 @@ app.patch("/riders/complete-delivered/update", async (req, res) => {
 
     await parcelsCollections.updateOne(
       { _id: new ObjectId(parcelId) },
-      { $set: { deliveryStatus: "delivered", currentLocation: "delivered" } },
+      {
+        $set: {
+          deliveryStatus: "delivered",
+          currentLocation: "delivered",
+          deliveredAt: new Date(),
+        },
+      },
     );
     const parcel = await parcelsCollections.findOne({
       _id: new ObjectId(parcelId),
@@ -1583,9 +1643,8 @@ app.get("/hub-profit-metrics/:hubName", async (req, res) => {
       success: true,
       hubName,
       totalParcelCount: payableParcelCount,
-      hqPayableProfit, 
+      hqPayableProfit,
     });
-
   } catch (error) {
     console.error("Hub Profit Metrics Error:", error);
     res.status(500).send({ success: false, message: "Internal Server Error" });
@@ -1739,13 +1798,11 @@ app.post("/deposit-HQ/:hubName", async (req, res) => {
     });
   } catch (error) {
     console.error("Deposit HQ Error:", error);
-    res
-      .status(500)
-      .send({
-        success: false,
-        message: "Internal Server Error",
-        error: error.message,
-      });
+    res.status(500).send({
+      success: false,
+      message: "Internal Server Error",
+      error: error.message,
+    });
   }
 });
 
@@ -1783,28 +1840,27 @@ app.get("/hub-deposit-history", async (req, res) => {
 app.patch("/approve-deposit/:id", async (req, res) => {
   try {
     const { id } = req.params;
-  const { hqPaymentsCollections, parcelsCollections } = await connectDB();
+    const { hqPaymentsCollections, parcelsCollections } = await connectDB();
 
-  const invoice = await hqPaymentsCollections.findOne({
-    _id: new ObjectId(id),
-  });
-  const objectParcelIds = invoice.parcelIds.map(id => new ObjectId(id));
-  
-  await hqPaymentsCollections.updateOne(
-    { _id: new ObjectId(id) },
-    { $set: { status: "approved", approvedAt: new Date().toISOString() } },
-  );
-  
-  await parcelsCollections.updateMany(
-    { _id: { $in: objectParcelIds } },
-    { $set: { isDepositedToHQ: true, depositRequestStatus: "approved" } },
-  );
+    const invoice = await hqPaymentsCollections.findOne({
+      _id: new ObjectId(id),
+    });
+    const objectParcelIds = invoice.parcelIds.map((id) => new ObjectId(id));
 
-  res.send({ success: true, message: "Deposit approved successfully!" });
+    await hqPaymentsCollections.updateOne(
+      { _id: new ObjectId(id) },
+      { $set: { status: "approved", approvedAt: new Date().toISOString() } },
+    );
+
+    await parcelsCollections.updateMany(
+      { _id: { $in: objectParcelIds } },
+      { $set: { isDepositedToHQ: true, depositRequestStatus: "approved" } },
+    );
+
+    res.send({ success: true, message: "Deposit approved successfully!" });
   } catch (error) {
     res.status(500).send({ success: false, message: "Internal Server Error" });
   }
-  
 });
 
 // Health check
