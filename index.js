@@ -440,9 +440,41 @@ app.get("/rider/:email", async (req, res) => {
     );
 
     const startOfToday = new Date(); // 12.00 Morning
-    startOfToday.setHours(0, 0, 0, 0);
+    startOfToday.setHours(4, 0, 0, 0);
     const endOfToday = new Date(); // 11.59 Night
     endOfToday.setHours(23, 59, 59, 999);
+
+    const todaysParcels = await parcelsCollections
+      .find({
+        $or: [
+          {
+            "deliveryRider.email": email,
+            "deliveryRider.assignedAt": {
+              $gte: startOfToday,
+              $lte: endOfToday,
+            },
+          },
+          {
+            "pickupRider.email": email,
+            "pickupRider.assignedAt": {
+              $gte: startOfToday,
+              $lte: endOfToday,
+            },
+          },
+        ],
+        deliveryStatus: {
+          $in: ["delivered", "assign-pickup-rider", "assign-delivery-rider"],
+        },
+      })
+      .toArray();
+
+    const todayDeliveryCompleteParcels = todaysParcels?.filter(
+      (parcel) => parcel.deliveryStatus === "delivered",
+    );
+
+    const todayPickUpCompleteParcels = todaysParcels?.filter(
+      (parcel) => parcel.deliveryStatus === "picked-up",
+    );
 
     const deliveredParcels = await parcelsCollections
       .find({
@@ -463,6 +495,14 @@ app.get("/rider/:email", async (req, res) => {
           )
         : 0;
 
+    const conversionRate =
+      (riderData.successfullyComplete / riderData.totalAssign) * 100;
+
+    const loadHandled = deliveredParcels.reduce(
+      (total, parcel) => total + (Number(parcel.parcelWeight) || 0),
+      0,
+    );
+
     res.send({
       success: true,
       riderData,
@@ -470,6 +510,14 @@ app.get("/rider/:email", async (req, res) => {
       holdUpParcels,
       deliveredParcels,
       totalCollectedAmount,
+      conversionRate,
+      loadHandled,
+      todaysParcels,
+      todaysParcelCount: todaysParcels.length || 0,
+      todayPickUpCompleteParcels,
+      todayDeliveryCompleteParcels,
+      todaysCompleteTotal:
+        todayPickUpCompleteParcels.length + todayDeliveryCompleteParcels.length || 0,
     });
   } catch (error) {
     res.status(500).send({ success: false, message: "Internal Server Error" });
@@ -639,6 +687,7 @@ app.patch("/parcels/assign-rider", async (req, res) => {
             name: riderName,
             email: riderEmail,
             phone: riderPhone,
+            assignedAt: new Date(),
           },
         },
       },
@@ -647,7 +696,7 @@ app.patch("/parcels/assign-rider", async (req, res) => {
     const riderUpdate = await ridersCollections.updateOne(
       { _id: new ObjectId(riderId) },
       {
-        $inc: { currentTasks: 1 },
+        $inc: { currentTasks: 1, totalAssign: 1 },
         $push: {
           activeTasks: {
             parcelId: new ObjectId(parcelId),
@@ -695,6 +744,7 @@ app.patch("/parcels/assign-delivery", async (req, res) => {
             name: riderName,
             email: riderEmail,
             phone: riderPhone,
+            assignedAt: new Date(),
           },
         },
       },
@@ -703,7 +753,7 @@ app.patch("/parcels/assign-delivery", async (req, res) => {
     const riderUpdate = await ridersCollections.updateOne(
       { _id: new ObjectId(riderId) },
       {
-        $inc: { currentTasks: 1 },
+        $inc: { currentTasks: 1, totalAssign: 1 },
         $push: {
           activeTasks: {
             parcelId: new ObjectId(parcelId),
@@ -756,7 +806,7 @@ app.patch("/riders/complete-pickup/update", async (req, res) => {
     const result = await ridersCollections.updateOne(
       { _id: new ObjectId(riderId) },
       {
-        $inc: { currentTasks: -1 },
+        $inc: { currentTasks: -1, successfullyComplete: 1 },
         $pull: { activeTasks: { parcelId: new ObjectId(parcelId) } },
       },
     );
@@ -803,7 +853,7 @@ app.patch("/riders/complete-delivered/update", async (req, res) => {
     const result = await ridersCollections.updateOne(
       { _id: new ObjectId(riderId) },
       {
-        $inc: { currentTasks: -1 },
+        $inc: { currentTasks: -1, successfullyComplete: 1 },
         $pull: { activeTasks: { parcelId: new ObjectId(parcelId) } },
       },
     );
