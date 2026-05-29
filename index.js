@@ -652,6 +652,8 @@ app.patch("/parcels/assign-rider", async (req, res) => {
           activeTasks: {
             parcelId: new ObjectId(parcelId),
             trackingID: trackingID,
+            parcelName: parcelData.parcelName,
+            codAmount: parcelData.codAmount,
             pickupLocation: parcelData.senderInfo.address,
             merchantName: parcelData.senderInfo.name,
             merchantPhone: parcelData.senderInfo.phone,
@@ -706,6 +708,8 @@ app.patch("/parcels/assign-delivery", async (req, res) => {
           activeTasks: {
             parcelId: new ObjectId(parcelId),
             trackingID: trackingID,
+            parcelName: parcelData.parcelName,
+            codAmount: parcelData.codAmount,
             deliveryLocation: parcelData.receiverInfo.address,
             consumerName: parcelData.receiverInfo.name,
             consumerPhone: parcelData.receiverInfo.phone,
