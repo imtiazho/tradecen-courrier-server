@@ -440,7 +440,7 @@ app.get("/rider/:email", async (req, res) => {
     );
 
     const startOfToday = new Date(); // 12.00 Morning
-    startOfToday.setHours(4, 0, 0, 0);
+    startOfToday.setHours(0, 0, 0, 0);
     const endOfToday = new Date(); // 11.59 Night
     endOfToday.setHours(23, 59, 59, 999);
 
@@ -530,6 +530,39 @@ app.get("/rider/:email", async (req, res) => {
         todayPickUpCompleteParcels.length +
           todayDeliveryCompleteParcels.length || 0,
     });
+  } catch (error) {
+    res.status(500).send({ success: false, message: "Internal Server Error" });
+  }
+});
+
+app.patch("/riders/hold-parcel/update", async (req, res) => {
+  try {
+    const { ridersCollections, parcelsCollections } = await connectDB();
+    const { riderId, parcelId } = req.body;
+
+    const result = await ridersCollections.updateOne(
+      { _id: new ObjectId(riderId) },
+      {
+        $set: { "activeTasks.$[elem].isHold": true },
+      },
+      {
+        arrayFilters: [{ "elem.parcelId": new ObjectId(parcelId) }],
+      },
+    );
+
+    await parcelsCollections.updateOne(
+      { _id: new ObjectId(parcelId) },
+      { $set: { deliveryStatus: "hold" } }
+    );
+
+    const parcelData = await parcelsCollections.findOne({
+      _id: new ObjectId(parcelId),
+    });
+    await logTracking(parcelData, "hold-up");
+
+    res
+      .status(200)
+      .send({ success: true, message: "Parcel marked as hold everywhere!" });
   } catch (error) {
     res.status(500).send({ success: false, message: "Internal Server Error" });
   }
