@@ -463,7 +463,7 @@ app.get("/rider/:email", async (req, res) => {
           },
         ],
         deliveryStatus: {
-          $in: ["delivered", "assign-pickup-rider", "assign-delivery-rider"],
+          $in: ["delivered", "assign-pickup-rider", "picked-up", "assign-delivery-rider"],
         },
       })
       .toArray();
@@ -498,7 +498,7 @@ app.get("/rider/:email", async (req, res) => {
     const conversionRate =
       (riderData.successfullyComplete / riderData.totalAssign) * 100;
 
-    const loadHandled = deliveredParcels.reduce(
+    const loadHandled = todaysParcels.reduce(
       (total, parcel) => total + (Number(parcel.parcelWeight) || 0),
       0,
     );
