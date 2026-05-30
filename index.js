@@ -463,7 +463,12 @@ app.get("/rider/:email", async (req, res) => {
           },
         ],
         deliveryStatus: {
-          $in: ["delivered", "assign-pickup-rider", "picked-up", "assign-delivery-rider"],
+          $in: [
+            "delivered",
+            "assign-pickup-rider",
+            "picked-up",
+            "assign-delivery-rider",
+          ],
         },
       })
       .toArray();
@@ -498,10 +503,15 @@ app.get("/rider/:email", async (req, res) => {
     const conversionRate =
       (riderData.successfullyComplete / riderData.totalAssign) * 100;
 
-    const loadHandled = todaysParcels.reduce(
-      (total, parcel) => total + (Number(parcel.parcelWeight) || 0),
-      0,
-    );
+    const loadHandled =
+      todayDeliveryCompleteParcels.reduce(
+        (total, parcel) => total + (Number(parcel.parcelWeight) || 0),
+        0,
+      ) +
+      todayPickUpCompleteParcels.reduce(
+        (total, parcel) => total + (Number(parcel.parcelWeight) || 0),
+        0,
+      );
 
     res.send({
       success: true,
@@ -517,7 +527,8 @@ app.get("/rider/:email", async (req, res) => {
       todayPickUpCompleteParcels,
       todayDeliveryCompleteParcels,
       todaysCompleteTotal:
-        todayPickUpCompleteParcels.length + todayDeliveryCompleteParcels.length || 0,
+        todayPickUpCompleteParcels.length +
+          todayDeliveryCompleteParcels.length || 0,
     });
   } catch (error) {
     res.status(500).send({ success: false, message: "Internal Server Error" });
