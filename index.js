@@ -535,6 +535,36 @@ app.get("/rider/:email", async (req, res) => {
   }
 });
 
+app.patch("/rider/status/:email", async (req, res) => {
+  try {
+    const { ridersCollections } = await connectDB();
+    const { workStatus } = req.body;
+    const { email } = req.params;
+
+    const result = await ridersCollections.updateOne(
+      { email: email },
+      {
+        $set: {
+          workStatus: workStatus,
+        },
+      },
+    );
+
+    if (result.modifiedCount > 0 || result.matchedCount > 0) {
+      return res.send({
+        success: true,
+        message: "Rider status synchronized successfully!",
+      });
+    } else {
+      return res
+        .status(404)
+        .send({ success: false, message: "Rider not found" });
+    }
+  } catch (error) {
+    res.status(500).send({ message: "Internal Server Error" });
+  }
+});
+
 app.patch("/riders/hold-parcel/update", async (req, res) => {
   try {
     const { ridersCollections, parcelsCollections } = await connectDB();
@@ -552,7 +582,7 @@ app.patch("/riders/hold-parcel/update", async (req, res) => {
 
     await parcelsCollections.updateOne(
       { _id: new ObjectId(parcelId) },
-      { $set: { deliveryStatus: "hold" } }
+      { $set: { deliveryStatus: "hold" } },
     );
 
     const parcelData = await parcelsCollections.findOne({
