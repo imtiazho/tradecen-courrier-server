@@ -444,6 +444,15 @@ app.get("/rider/:email", async (req, res) => {
     const endOfToday = new Date(); // 11.59 Night
     endOfToday.setHours(23, 59, 59, 999);
 
+    const allHandledParcels = await parcelsCollections
+      .find({
+        $or: [{ "deliveryRider.email": email }, { "pickupRider.email": email }],
+        deliveryStatus: {
+          $in: ["picked-up", "delivered"],
+        },
+      }).sort({createdAt: -1})
+      .toArray();
+
     const todaysParcels = await parcelsCollections
       .find({
         $or: [
@@ -516,6 +525,7 @@ app.get("/rider/:email", async (req, res) => {
     res.send({
       success: true,
       riderData,
+      allHandledParcels,
       assignedParcels,
       holdUpParcels,
       deliveredParcels,
