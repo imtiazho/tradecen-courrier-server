@@ -482,6 +482,7 @@ app.get("/rider/:email", async (req, res) => {
       })
       .toArray();
 
+      // Today's
     const todayDeliveryCompleteParcels = todaysParcels?.filter(
       (parcel) => parcel.deliveryStatus === "delivered",
     );
@@ -489,6 +490,16 @@ app.get("/rider/:email", async (req, res) => {
     const todayPickUpCompleteParcels = todaysParcels?.filter(
       (parcel) => parcel.deliveryStatus === "picked-up",
     );
+
+    // All
+    const allDeliveryCompleteParcels = allHandledParcels?.filter(
+      (parcel) => parcel.deliveryStatus === "delivered",
+    );
+
+    const allPickUpCompleteParcels = allHandledParcels?.filter(
+      (parcel) => parcel.deliveryStatus === "picked-up",
+    );
+
 
     const deliveredParcels = await parcelsCollections
       .find({
@@ -533,6 +544,8 @@ app.get("/rider/:email", async (req, res) => {
       conversionRate,
       loadHandled,
       todaysParcels,
+      allDeliveryCompleteParcels,
+      allPickUpCompleteParcels,
       todaysParcelCount: todaysParcels.length || 0,
       todayPickUpCompleteParcels,
       todayDeliveryCompleteParcels,
