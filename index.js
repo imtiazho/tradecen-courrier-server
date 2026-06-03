@@ -394,7 +394,9 @@ app.get("/parcels/out-for-delivery/:hubName", async (req, res) => {
     const { hubName } = req.params;
     const query = {
       "serviceCenters.destination": hubName,
-      deliveryStatus: "assign-delivery-rider",
+      deliveryStatus: {
+        $in: ["assign-delivery-rider", "hold"],
+      },
     };
 
     const result = await parcelsCollections.find(query).toArray();
@@ -450,7 +452,8 @@ app.get("/rider/:email", async (req, res) => {
         deliveryStatus: {
           $in: ["picked-up", "delivered"],
         },
-      }).sort({createdAt: -1})
+      })
+      .sort({ createdAt: -1 })
       .toArray();
 
     const todaysParcels = await parcelsCollections
@@ -482,7 +485,7 @@ app.get("/rider/:email", async (req, res) => {
       })
       .toArray();
 
-      // Today's
+    // Today's
     const todayDeliveryCompleteParcels = todaysParcels?.filter(
       (parcel) => parcel.deliveryStatus === "delivered",
     );
@@ -499,7 +502,6 @@ app.get("/rider/:email", async (req, res) => {
     const allPickUpCompleteParcels = allHandledParcels?.filter(
       (parcel) => parcel.deliveryStatus === "picked-up",
     );
-
 
     const deliveredParcels = await parcelsCollections
       .find({
@@ -520,8 +522,9 @@ app.get("/rider/:email", async (req, res) => {
           )
         : 0;
 
-    const conversionRate =
-      (riderData.successfullyComplete / riderData.totalAssign) * 100;
+    const conversionRate = Math.round(
+      (riderData.successfullyComplete / riderData.totalAssign) * 100,
+    );
 
     const loadHandled =
       todayDeliveryCompleteParcels.reduce(
@@ -2009,6 +2012,103 @@ app.patch("/approve-deposit/:id", async (req, res) => {
     );
 
     res.send({ success: true, message: "Deposit approved successfully!" });
+  } catch (error) {
+    res.status(500).send({ success: false, message: "Internal Server Error" });
+  }
+});
+
+/* ---- Master Admin ---- */
+app.get("/master-admin/main-dashboard", async (req, res) => {
+  try {
+    const { parcelsCollections, merchantsCollections, ridersCollections } =
+      await connectDB();
+    const revenueResult = await parcelsCollections
+      .aggregate([
+        {
+          $match: {
+            deliveryStatus: "delivered",
+          },
+        },
+        {
+          $group: {
+            _id: null,
+            total: { $sum: "$deliveryCharge" },
+          },
+        },
+      ])
+      .toArray();
+    const totalRevenue = revenueResult.length > 0 ? revenueResult[0].total : 0;
+    const totalParcels = await parcelsCollections.estimatedDocumentCount();
+    const totalMerchants = await merchantsCollections.estimatedDocumentCount();
+    const activeRiders = await ridersCollections.countDocuments({
+      currentTasks: { $gt: 0 },
+    });
+    const pendingPickUpAndDeliveryCount =
+      await parcelsCollections.countDocuments({
+        deliveryStatus: {
+          $in: ["assign-pickup-rider", "assign-delivery-rider"],
+        },
+      });
+    const inTransitAndPickedCount = await parcelsCollections.countDocuments({
+      deliveryStatus: {
+        $in: ["rider-carrying", "in-transit"],
+      },
+    });
+    const dispatchCount = await parcelsCollections.countDocuments({
+      deliveryStatus: "delivered",
+    });
+
+    const transitLiquidityResult = await parcelsCollections
+      .aggregate([
+        {
+          $match: {
+            status: "delivered",
+            revMethod: "COD",
+            isDepositedToHQ: false,
+          },
+        },
+        {
+          $group: {
+            _id: null,
+            totalTransitCash: { $sum: "$codAmount" },
+          },
+        },
+      ])
+      .toArray();
+    const codInTransit =
+      transitLiquidityResult.length > 0
+        ? transitLiquidityResult[0].totalTransitCash
+        : 0;
+
+    const recentParcels = await parcelsCollections
+      .find({})
+      .sort({ createdAt: -1 })
+      .limit(3)
+      .project({
+        trackingID: 1,
+        "senderInfo.name": 1,
+        "receiverInfo.name": 1,
+        deliveryStatus: 1,
+        codAmount: 1,
+      })
+      .toArray();
+
+    res.status(200).send({
+      success: true,
+      metrics: {
+        totalRevenue,
+        totalParcels,
+        totalMerchants,
+        activeRiders,
+        codInTransit,
+      },
+      pipeline: {
+        pendingPickUpAndDeliveryCount,
+        inTransitAndPickedCount,
+        dispatchCount,
+      },
+      recentParcels,
+    });
   } catch (error) {
     res.status(500).send({ success: false, message: "Internal Server Error" });
   }
