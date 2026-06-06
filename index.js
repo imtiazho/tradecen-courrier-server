@@ -457,6 +457,7 @@ app.get("/parcels/out-for-delivery/:hubName", async (req, res) => {
     res.status(500).send({ message: "Error out for delivery parcels" });
   }
 });
+
 app.get("/parcels/hub-delivered/:hubName", async (req, res) => {
   try {
     const { parcelsCollections } = await connectDB();
