@@ -22,9 +22,64 @@ const port = process.env.PORT || 5000;
 // DNS fix
 dns.setServers(["8.8.8.8", "8.8.4.4"]);
 
-// middleware
+// Middleware
 app.use(cors());
 app.use(express.json());
+
+const verifyFireBaseToken = async (req, res, next) => {
+  const token = req.headers.authorization;
+  if (!token || !token.startsWith("Bearer ")) {
+    return res.status(401).send({ message: "Unauthorized Access" });
+  }
+  try {
+    const idToken = token.split(" ")[1];
+    const decoded = await admin.auth().verifyIdToken(idToken);
+    req.decoded_email = decoded.email;
+    next();
+  } catch (err) {
+    return res.status(401).send({ message: "Unauthorized Access" });
+  }
+};
+
+const verifyAdminToken = async (req, res, next) => {
+  const email = req.decoded_email;
+  const { userCollections } = await connectDB();
+  const user = await userCollections.findOne({ email });
+  if (!user || user.role !== "admin") {
+    return res.status(403).send({ message: "Forbidden Access" });
+  }
+  next();
+};
+
+const verifyMerchantToken = async (req, res, next) => {
+  const email = req.decoded_email;
+  const { userCollections } = await connectDB();
+  const user = await userCollections.findOne({ email });
+  if (!user || user.role !== "merchant") {
+    return res.status(403).send({ message: "Forbidden Access" });
+  }
+  next();
+};
+
+const verifyRiderToken = async (req, res, next) => {
+  const email = req.decoded_email;
+  const { userCollections } = await connectDB();
+  const user = await userCollections.findOne({ email });
+  if (!user || user.role !== "rider") {
+    return res.status(403).send({ message: "Forbidden Access" });
+  }
+  next();
+};
+
+const verifyHubManagerToken = async (req, res, next) => {
+  const email = req.decoded_email;
+  const { userCollections } = await connectDB();
+  const user = await userCollections.findOne({ email });
+  if (!user || user.role !== "hub-manager") {
+    return res.status(403).send({ message: "Forbidden Access" });
+  }
+  next();
+};
 
 // stripe
 const stripe = require("stripe")(process.env.STRIPE_SECRET);
@@ -116,7 +171,6 @@ app.get("/users", async (req, res) => {
     const { userCollections } = await connectDB();
     const searchText = req.query.searchText;
     const role = req.query.role;
-
     const query = {};
 
     if (searchText) {
@@ -280,13 +334,11 @@ app.patch("/users/make-hub-manager", async (req, res) => {
 });
 
 /* ---- Managers ---- */
-app.get("/users/hub-managers", async (req, res) => {
+app.get("/users/hub-managers", verifyFireBaseToken, async (req, res) => {
   try {
-    // const email = req.params;
     const { region, district, email } = req.query;
-
     let query = {};
-
+    console.log(req.decoded_email);
     if (email) {
       query.email = email;
     }
@@ -512,6 +564,7 @@ app.get("/rider/:email", async (req, res) => {
           $lte: endOfToday,
         },
       })
+      .sort({ deliveredAt: -1 })
       .toArray();
 
     const totalCollectedAmount =
@@ -1009,6 +1062,16 @@ app.delete("/riders/:id", async (req, res) => {
 });
 
 /* ---- Merchant APIs Start ---- */
+app.get("/all-merchants", async (req, res) => {
+  try {
+    const { merchantsCollections } = await connectDB();
+    const result = await merchantsCollections.find({}).toArray();
+    res.send(result);
+  } catch (error) {
+    res.status(500).send({ success: false, error: "Internal Server Error" });
+  }
+});
+
 app.get("/area-merchant/:hubName", async (req, res) => {
   try {
     const { merchantsCollections } = await connectDB();
