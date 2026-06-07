@@ -489,14 +489,15 @@ app.get("/rider/:email", async (req, res) => {
         .send({ success: false, message: "Rider not found in TradeCen" });
     }
 
-    const assignedParcels = riderData.activeTasks;
-    const holdUpParcels = riderData.activeTasks.filter(
-      (parcel) => parcel.isHold === true,
+    // Safe handling for active tasks
+    const assignedParcels = riderData.activeTasks || [];
+    const holdUpParcels = assignedParcels.filter(
+      (parcel) => parcel && parcel.isHold === true,
     );
 
-    const startOfToday = new Date(); // 12.00 Morning
+    const startOfToday = new Date();
     startOfToday.setHours(0, 0, 0, 0);
-    const endOfToday = new Date(); // 11.59 Night
+    const endOfToday = new Date();
     endOfToday.setHours(23, 59, 59, 999);
 
     const allHandledParcels = await parcelsCollections
@@ -539,20 +540,20 @@ app.get("/rider/:email", async (req, res) => {
       .toArray();
 
     // Today's
-    const todayDeliveryCompleteParcels = todaysParcels?.filter(
+    const todayDeliveryCompleteParcels = (todaysParcels || []).filter(
       (parcel) => parcel.deliveryStatus === "delivered",
     );
 
-    const todayPickUpCompleteParcels = todaysParcels?.filter(
+    const todayPickUpCompleteParcels = (todaysParcels || []).filter(
       (parcel) => parcel.deliveryStatus === "picked-up",
     );
 
     // All
-    const allDeliveryCompleteParcels = allHandledParcels?.filter(
+    const allDeliveryCompleteParcels = (allHandledParcels || []).filter(
       (parcel) => parcel.deliveryStatus === "delivered",
     );
 
-    const allPickUpCompleteParcels = allHandledParcels?.filter(
+    const allPickUpCompleteParcels = (allHandledParcels || []).filter(
       (parcel) => parcel.deliveryStatus === "picked-up",
     );
 
@@ -576,9 +577,11 @@ app.get("/rider/:email", async (req, res) => {
           )
         : 0;
 
-    const conversionRate = Math.round(
-      (riderData.successfullyComplete / riderData.totalAssign) * 100,
-    );
+    const totalAssign = Number(riderData.totalAssign) || 0;
+    const successfullyComplete = Number(riderData.successfullyComplete) || 0;
+    const conversionRate = totalAssign > 0 
+      ? Math.round((successfullyComplete / totalAssign) * 100) 
+      : 0;
 
     const loadHandled =
       todayDeliveryCompleteParcels.reduce(
@@ -611,6 +614,7 @@ app.get("/rider/:email", async (req, res) => {
           todayDeliveryCompleteParcels.length || 0,
     });
   } catch (error) {
+    console.error("Rider API Error:", error);
     res.status(500).send({ success: false, message: "Internal Server Error" });
   }
 });
