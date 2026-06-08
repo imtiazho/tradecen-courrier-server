@@ -41,6 +41,28 @@ const verifyFireBaseToken = async (req, res, next) => {
   }
 };
 
+const verifyOwner = (req, res, next) => {
+  const requestedEmail = req.params.email || req.query.email || req.body.email;
+  const decodedEmail = req.decoded_email;
+
+  if (!requestedEmail) {
+    return res
+      .status(400)
+      .send({ success: false, message: "Email parameter is required" });
+  }
+
+  if (requestedEmail !== decodedEmail) {
+    return res
+      .status(403)
+      .send({
+        success: false,
+        message: "Forbidden: You cannot access other user's data",
+      });
+  }
+
+  next();
+};
+
 const verifyAdminToken = async (req, res, next) => {
   const email = req.decoded_email;
   const { userCollections } = await connectDB();
@@ -196,12 +218,12 @@ app.get("/users", async (req, res) => {
   }
 });
 
-app.get("/user/:email", async (req, res) => {
+app.get("/user/:email", verifyFireBaseToken, verifyOwner, async (req, res) => {
   try {
     const { userCollections } = await connectDB();
     const email = req.params.email;
     const user = await userCollections.findOne({ email: email });
-
+    
     if (!user) {
       return res.status(404).send({
         success: false,
@@ -284,9 +306,9 @@ app.patch("/users/verify-status/:email", async (req, res) => {
   }
 });
 
-app.patch("/users/make-hub-manager", async (req, res) => {
+app.patch("/users/make-hub-manager", verifyFireBaseToken, verifyAdminToken,  async (req, res) => {
   try {
-    const data = req.body; // { email, region, district, hubName }
+    const data = req.body;
     const { email, region, district, hubName } = data;
 
     const userFilter = { email: email };
@@ -334,11 +356,11 @@ app.patch("/users/make-hub-manager", async (req, res) => {
 });
 
 /* ---- Managers ---- */
-app.get("/users/hub-managers", verifyFireBaseToken, async (req, res) => {
+app.get("/users/hub-managers", verifyFireBaseToken, verifyAdminToken, async (req, res) => {
   try {
     const { region, district, email } = req.query;
     let query = {};
-    console.log(req.decoded_email);
+    
     if (email) {
       query.email = email;
     }
@@ -579,9 +601,10 @@ app.get("/rider/:email", async (req, res) => {
 
     const totalAssign = Number(riderData.totalAssign) || 0;
     const successfullyComplete = Number(riderData.successfullyComplete) || 0;
-    const conversionRate = totalAssign > 0 
-      ? Math.round((successfullyComplete / totalAssign) * 100) 
-      : 0;
+    const conversionRate =
+      totalAssign > 0
+        ? Math.round((successfullyComplete / totalAssign) * 100)
+        : 0;
 
     const loadHandled =
       todayDeliveryCompleteParcels.reduce(
@@ -2086,7 +2109,7 @@ app.patch("/approve-deposit/:id", async (req, res) => {
 });
 
 /* ---- Master Admin ---- */
-app.get("/master-admin/main-dashboard", async (req, res) => {
+app.get("/master-admin/main-dashboard", verifyFireBaseToken, verifyAdminToken, async (req, res) => {
   try {
     const { parcelsCollections, merchantsCollections, ridersCollections } =
       await connectDB();
