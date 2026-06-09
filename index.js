@@ -41,6 +41,31 @@ const verifyFireBaseToken = async (req, res, next) => {
   }
 };
 
+const verifyRoles = (...allowedRoles) => {
+  return async (req, res, next) => {
+    try {
+      const email = req.decoded_email;
+      const { userCollections } = await connectDB();
+      const user = await userCollections.findOne({ email });
+
+      if (!user) {
+        return res.status(404).send({ success: false, message: "User not found" });
+      }
+
+      if (!allowedRoles.includes(user.role)) {
+        return res.status(403).send({ 
+          success: false, 
+          message: "Forbidden Access: You do not have permission for this resource" 
+        });
+      }
+
+      next();
+    } catch (error) {
+      res.status(500).send({ success: false, message: "Internal Server Error" });
+    }
+  };
+};
+
 const verifyOwner = (req, res, next) => {
   const requestedEmail = req.params.email || req.query.email || req.body.email;
   const decodedEmail = req.decoded_email;
@@ -102,6 +127,7 @@ const verifyHubManagerToken = async (req, res, next) => {
   }
   next();
 };
+
 
 // stripe
 const stripe = require("stripe")(process.env.STRIPE_SECRET);
@@ -749,12 +775,12 @@ app.post("/riders", async (req, res) => {
 //   }
 // });
 
-app.get("/riders", async (req, res) => {
+app.get("/riders", verifyFireBaseToken, async (req, res) => {
   try {
     const { ridersCollections } = await connectDB();
     const { status, workStatus, email, area } = req.query;
     let query = {};
-
+    console.log(req.decoded_email);
     if (status) {
       query.status = status;
     }
@@ -800,7 +826,7 @@ app.get("/riders/available/:areaName", async (req, res) => {
   }
 });
 
-app.patch("/riders/:id", async (req, res) => {
+app.patch("/riders/:id", verifyFireBaseToken, verifyAdminToken, async (req, res) => {
   try {
     const { ridersCollections, userCollections } = await connectDB();
     const id = req.params.id;
@@ -1090,10 +1116,11 @@ app.delete("/riders/:id", async (req, res) => {
 });
 
 /* ---- Merchant APIs Start ---- */
-app.get("/all-merchants", async (req, res) => {
+app.get("/all-merchants", verifyFireBaseToken, verifyAdminToken, async (req, res) => {
   try {
     const { merchantsCollections } = await connectDB();
     const result = await merchantsCollections.find({}).toArray();
+    console.log(req.decoded_email);
     res.send(result);
   } catch (error) {
     res.status(500).send({ success: false, error: "Internal Server Error" });
@@ -2051,7 +2078,7 @@ app.post("/deposit-HQ/:hubName", async (req, res) => {
   }
 });
 
-app.get("/hub-deposit-history", async (req, res) => {
+app.get("/hub-deposit-history", verifyFireBaseToken, verifyRoles('hub-manager', "admin"), async (req, res) => {
   try {
     const { hubName, status } = req.query;
     const { hqPaymentsCollections } = await connectDB();
@@ -2082,7 +2109,7 @@ app.get("/hub-deposit-history", async (req, res) => {
   }
 });
 
-app.patch("/approve-deposit/:id", async (req, res) => {
+app.patch("/approve-deposit/:id", verifyFireBaseToken, verifyAdminToken, async (req, res) => {
   try {
     const { id } = req.params;
     const { hqPaymentsCollections, parcelsCollections } = await connectDB();
