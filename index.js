@@ -382,7 +382,7 @@ app.patch("/users/make-hub-manager", verifyFireBaseToken, verifyAdminToken,  asy
 });
 
 /* ---- Managers ---- */
-app.get("/users/hub-managers", verifyFireBaseToken, verifyAdminToken, async (req, res) => {
+app.get("/users/hub-managers", verifyFireBaseToken, verifyRoles("admin", "hub-manager"), async (req, res) => {
   try {
     const { region, district, email } = req.query;
     let query = {};
@@ -526,7 +526,7 @@ app.get("/parcels/hub-delivered/:hubName", async (req, res) => {
 });
 
 /*---- Rider Related APIs Start ----*/
-app.get("/rider/:email", async (req, res) => {
+app.get("/rider/:email", verifyFireBaseToken, verifyRiderToken, async (req, res) => {
   try {
     const { ridersCollections, parcelsCollections } = await connectDB();
     const email = req.params.email;
@@ -698,7 +698,7 @@ app.patch("/rider/status/:email", async (req, res) => {
   }
 });
 
-app.patch("/riders/hold-parcel/update", async (req, res) => {
+app.patch("/riders/hold-parcel/update", verifyFireBaseToken, verifyRiderToken, async (req, res) => {
   try {
     const { ridersCollections, parcelsCollections } = await connectDB();
     const { riderId, parcelId } = req.body;
@@ -990,7 +990,7 @@ app.patch("/parcels/assign-delivery", async (req, res) => {
   }
 });
 
-app.patch("/riders/complete-pickup/update", async (req, res) => {
+app.patch("/riders/complete-pickup/update", verifyFireBaseToken, verifyRiderToken, async (req, res) => {
   try {
     const { riderId, parcelId, trackingID } = req.body;
     const { parcelsCollections, ridersCollections } = await connectDB();
@@ -1027,7 +1027,7 @@ app.patch("/riders/complete-pickup/update", async (req, res) => {
   }
 });
 
-app.patch("/riders/complete-delivered/update", async (req, res) => {
+app.patch("/riders/complete-delivered/update", verifyFireBaseToken, verifyRiderToken, async (req, res) => {
   try {
     const { riderId, parcelId, trackingID } = req.body;
     const { parcelsCollections, ridersCollections, merchantsCollections } =
