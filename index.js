@@ -49,19 +49,24 @@ const verifyRoles = (...allowedRoles) => {
       const user = await userCollections.findOne({ email });
 
       if (!user) {
-        return res.status(404).send({ success: false, message: "User not found" });
+        return res
+          .status(404)
+          .send({ success: false, message: "User not found" });
       }
 
       if (!allowedRoles.includes(user.role)) {
-        return res.status(403).send({ 
-          success: false, 
-          message: "Forbidden Access: You do not have permission for this resource" 
+        return res.status(403).send({
+          success: false,
+          message:
+            "Forbidden Access: You do not have permission for this resource",
         });
       }
 
       next();
     } catch (error) {
-      res.status(500).send({ success: false, message: "Internal Server Error" });
+      res
+        .status(500)
+        .send({ success: false, message: "Internal Server Error" });
     }
   };
 };
@@ -77,12 +82,10 @@ const verifyOwner = (req, res, next) => {
   }
 
   if (requestedEmail !== decodedEmail) {
-    return res
-      .status(403)
-      .send({
-        success: false,
-        message: "Forbidden: You cannot access other user's data",
-      });
+    return res.status(403).send({
+      success: false,
+      message: "Forbidden: You cannot access other user's data",
+    });
   }
 
   next();
@@ -127,7 +130,6 @@ const verifyHubManagerToken = async (req, res, next) => {
   }
   next();
 };
-
 
 // stripe
 const stripe = require("stripe")(process.env.STRIPE_SECRET);
@@ -249,7 +251,7 @@ app.get("/user/:email", verifyFireBaseToken, verifyOwner, async (req, res) => {
     const { userCollections } = await connectDB();
     const email = req.params.email;
     const user = await userCollections.findOne({ email: email });
-    
+
     if (!user) {
       return res.status(404).send({
         success: false,
@@ -332,81 +334,93 @@ app.patch("/users/verify-status/:email", async (req, res) => {
   }
 });
 
-app.patch("/users/make-hub-manager", verifyFireBaseToken, verifyAdminToken,  async (req, res) => {
-  try {
-    const data = req.body;
-    const { email, region, district, hubName } = data;
+app.patch(
+  "/users/make-hub-manager",
+  verifyFireBaseToken,
+  verifyAdminToken,
+  async (req, res) => {
+    try {
+      const data = req.body;
+      const { email, region, district, hubName } = data;
 
-    const userFilter = { email: email };
-    const updateRole = {
-      $set: { role: "hub-manager" },
-    };
-    const updateResult = await userCollections.updateOne(
-      userFilter,
-      updateRole,
-    );
+      const userFilter = { email: email };
+      const updateRole = {
+        $set: { role: "hub-manager" },
+      };
+      const updateResult = await userCollections.updateOne(
+        userFilter,
+        updateRole,
+      );
 
-    if (updateResult.modifiedCount === 0) {
-      return res.status(404).send({
-        success: false,
-        message: "User not found or role already updated",
-      });
+      if (updateResult.modifiedCount === 0) {
+        return res.status(404).send({
+          success: false,
+          message: "User not found or role already updated",
+        });
+      }
+
+      const userProfile = await userCollections.findOne({ email: email });
+
+      const hubManagerDoc = {
+        userId: userProfile._id,
+        name: userProfile.displayName,
+        email: email,
+        photoURL: userProfile.photoURL || "",
+        region: region,
+        district: district,
+        hubName: hubName,
+        assignedAt: new Date(),
+        status: "active",
+      };
+
+      const insertResult = await hubManagersCollection.insertOne(hubManagerDoc);
+
+      if (insertResult.insertedId) {
+        res.send({
+          success: true,
+          message: "User promoted and added to Hub Managers collection",
+        });
+      }
+    } catch (error) {
+      console.error("Error adding hub manager:", error);
+      res
+        .status(500)
+        .send({ success: false, message: "Internal Server Error" });
     }
-
-    const userProfile = await userCollections.findOne({ email: email });
-
-    const hubManagerDoc = {
-      userId: userProfile._id,
-      name: userProfile.displayName,
-      email: email,
-      photoURL: userProfile.photoURL || "",
-      region: region,
-      district: district,
-      hubName: hubName,
-      assignedAt: new Date(),
-      status: "active",
-    };
-
-    const insertResult = await hubManagersCollection.insertOne(hubManagerDoc);
-
-    if (insertResult.insertedId) {
-      res.send({
-        success: true,
-        message: "User promoted and added to Hub Managers collection",
-      });
-    }
-  } catch (error) {
-    console.error("Error adding hub manager:", error);
-    res.status(500).send({ success: false, message: "Internal Server Error" });
-  }
-});
+  },
+);
 
 /* ---- Managers ---- */
-app.get("/users/hub-managers", verifyFireBaseToken, verifyRoles("admin", "hub-manager"), async (req, res) => {
-  try {
-    const { region, district, email } = req.query;
-    let query = {};
-    
-    if (email) {
-      query.email = email;
+app.get(
+  "/users/hub-managers",
+  verifyFireBaseToken,
+  verifyRoles("admin", "hub-manager"),
+  async (req, res) => {
+    try {
+      const { region, district, email } = req.query;
+      let query = {};
+
+      if (email) {
+        query.email = email;
+      }
+
+      if (region) {
+        query.region = region;
+      }
+
+      if (district) {
+        query.district = district;
+      }
+
+      const result = await hubManagersCollection.find(query).toArray();
+
+      res.status(200).send(result);
+    } catch (error) {
+      console.error("Error fetching managers:", error);
+      res.status(500).send({ message: "Internal Server Error" });
     }
-
-    if (region) {
-      query.region = region;
-    }
-
-    if (district) {
-      query.district = district;
-    }
-
-    const result = await hubManagersCollection.find(query).toArray();
-
-    res.status(200).send(result);
-  } catch (error) {
-    console.error("Error fetching managers:", error);
-    res.status(500).send({ message: "Internal Server Error" });
-  }
-});
+  },
+);
 
 app.get("/parcels/incoming/:hubName", async (req, res) => {
   try {
@@ -526,147 +540,157 @@ app.get("/parcels/hub-delivered/:hubName", async (req, res) => {
 });
 
 /*---- Rider Related APIs Start ----*/
-app.get("/rider/:email", verifyFireBaseToken, verifyRiderToken, async (req, res) => {
-  try {
-    const { ridersCollections, parcelsCollections } = await connectDB();
-    const email = req.params.email;
-    const riderData = await ridersCollections.findOne({ email: email });
-    if (!riderData) {
-      return res
-        .status(404)
-        .send({ success: false, message: "Rider not found in TradeCen" });
-    }
+app.get(
+  "/rider/:email",
+  verifyFireBaseToken,
+  verifyRiderToken,
+  async (req, res) => {
+    try {
+      const { ridersCollections, parcelsCollections } = await connectDB();
+      const email = req.params.email;
+      const riderData = await ridersCollections.findOne({ email: email });
+      if (!riderData) {
+        return res
+          .status(404)
+          .send({ success: false, message: "Rider not found in TradeCen" });
+      }
 
-    // Safe handling for active tasks
-    const assignedParcels = riderData.activeTasks || [];
-    const holdUpParcels = assignedParcels.filter(
-      (parcel) => parcel && parcel.isHold === true,
-    );
-
-    const startOfToday = new Date();
-    startOfToday.setHours(0, 0, 0, 0);
-    const endOfToday = new Date();
-    endOfToday.setHours(23, 59, 59, 999);
-
-    const allHandledParcels = await parcelsCollections
-      .find({
-        $or: [{ "deliveryRider.email": email }, { "pickupRider.email": email }],
-        deliveryStatus: {
-          $in: ["picked-up", "delivered"],
-        },
-      })
-      .sort({ createdAt: -1 })
-      .toArray();
-
-    const todaysParcels = await parcelsCollections
-      .find({
-        $or: [
-          {
-            "deliveryRider.email": email,
-            "deliveryRider.assignedAt": {
-              $gte: startOfToday,
-              $lte: endOfToday,
-            },
-          },
-          {
-            "pickupRider.email": email,
-            "pickupRider.assignedAt": {
-              $gte: startOfToday,
-              $lte: endOfToday,
-            },
-          },
-        ],
-        deliveryStatus: {
-          $in: [
-            "delivered",
-            "assign-pickup-rider",
-            "picked-up",
-            "assign-delivery-rider",
-          ],
-        },
-      })
-      .toArray();
-
-    // Today's
-    const todayDeliveryCompleteParcels = (todaysParcels || []).filter(
-      (parcel) => parcel.deliveryStatus === "delivered",
-    );
-
-    const todayPickUpCompleteParcels = (todaysParcels || []).filter(
-      (parcel) => parcel.deliveryStatus === "picked-up",
-    );
-
-    // All
-    const allDeliveryCompleteParcels = (allHandledParcels || []).filter(
-      (parcel) => parcel.deliveryStatus === "delivered",
-    );
-
-    const allPickUpCompleteParcels = (allHandledParcels || []).filter(
-      (parcel) => parcel.deliveryStatus === "picked-up",
-    );
-
-    const deliveredParcels = await parcelsCollections
-      .find({
-        "deliveryRider.email": email,
-        deliveryStatus: "delivered",
-        deliveredAt: {
-          $gte: startOfToday,
-          $lte: endOfToday,
-        },
-      })
-      .sort({ deliveredAt: -1 })
-      .toArray();
-
-    const totalCollectedAmount =
-      deliveredParcels.length > 0
-        ? deliveredParcels.reduce(
-            (total, parcel) => total + (Number(parcel.codAmount) || 0),
-            0,
-          )
-        : 0;
-
-    const totalAssign = Number(riderData.totalAssign) || 0;
-    const successfullyComplete = Number(riderData.successfullyComplete) || 0;
-    const conversionRate =
-      totalAssign > 0
-        ? Math.round((successfullyComplete / totalAssign) * 100)
-        : 0;
-
-    const loadHandled =
-      todayDeliveryCompleteParcels.reduce(
-        (total, parcel) => total + (Number(parcel.parcelWeight) || 0),
-        0,
-      ) +
-      todayPickUpCompleteParcels.reduce(
-        (total, parcel) => total + (Number(parcel.parcelWeight) || 0),
-        0,
+      // Safe handling for active tasks
+      const assignedParcels = riderData.activeTasks || [];
+      const holdUpParcels = assignedParcels.filter(
+        (parcel) => parcel && parcel.isHold === true,
       );
 
-    res.send({
-      success: true,
-      riderData,
-      allHandledParcels,
-      assignedParcels,
-      holdUpParcels,
-      deliveredParcels,
-      totalCollectedAmount,
-      conversionRate,
-      loadHandled,
-      todaysParcels,
-      allDeliveryCompleteParcels,
-      allPickUpCompleteParcels,
-      todaysParcelCount: todaysParcels.length || 0,
-      todayPickUpCompleteParcels,
-      todayDeliveryCompleteParcels,
-      todaysCompleteTotal:
-        todayPickUpCompleteParcels.length +
-          todayDeliveryCompleteParcels.length || 0,
-    });
-  } catch (error) {
-    console.error("Rider API Error:", error);
-    res.status(500).send({ success: false, message: "Internal Server Error" });
-  }
-});
+      const startOfToday = new Date();
+      startOfToday.setHours(0, 0, 0, 0);
+      const endOfToday = new Date();
+      endOfToday.setHours(23, 59, 59, 999);
+
+      const allHandledParcels = await parcelsCollections
+        .find({
+          $or: [
+            { "deliveryRider.email": email },
+            { "pickupRider.email": email },
+          ],
+          deliveryStatus: {
+            $in: ["picked-up", "delivered"],
+          },
+        })
+        .sort({ createdAt: -1 })
+        .toArray();
+
+      const todaysParcels = await parcelsCollections
+        .find({
+          $or: [
+            {
+              "deliveryRider.email": email,
+              "deliveryRider.assignedAt": {
+                $gte: startOfToday,
+                $lte: endOfToday,
+              },
+            },
+            {
+              "pickupRider.email": email,
+              "pickupRider.assignedAt": {
+                $gte: startOfToday,
+                $lte: endOfToday,
+              },
+            },
+          ],
+          deliveryStatus: {
+            $in: [
+              "delivered",
+              "assign-pickup-rider",
+              "picked-up",
+              "assign-delivery-rider",
+            ],
+          },
+        })
+        .toArray();
+
+      // Today's
+      const todayDeliveryCompleteParcels = (todaysParcels || []).filter(
+        (parcel) => parcel.deliveryStatus === "delivered",
+      );
+
+      const todayPickUpCompleteParcels = (todaysParcels || []).filter(
+        (parcel) => parcel.deliveryStatus === "picked-up",
+      );
+
+      // All
+      const allDeliveryCompleteParcels = (allHandledParcels || []).filter(
+        (parcel) => parcel.deliveryStatus === "delivered",
+      );
+
+      const allPickUpCompleteParcels = (allHandledParcels || []).filter(
+        (parcel) => parcel.deliveryStatus === "picked-up",
+      );
+
+      const deliveredParcels = await parcelsCollections
+        .find({
+          "deliveryRider.email": email,
+          deliveryStatus: "delivered",
+          deliveredAt: {
+            $gte: startOfToday,
+            $lte: endOfToday,
+          },
+        })
+        .sort({ deliveredAt: -1 })
+        .toArray();
+
+      const totalCollectedAmount =
+        deliveredParcels.length > 0
+          ? deliveredParcels.reduce(
+              (total, parcel) => total + (Number(parcel.codAmount) || 0),
+              0,
+            )
+          : 0;
+
+      const totalAssign = Number(riderData.totalAssign) || 0;
+      const successfullyComplete = Number(riderData.successfullyComplete) || 0;
+      const conversionRate =
+        totalAssign > 0
+          ? Math.round((successfullyComplete / totalAssign) * 100)
+          : 0;
+
+      const loadHandled =
+        todayDeliveryCompleteParcels.reduce(
+          (total, parcel) => total + (Number(parcel.parcelWeight) || 0),
+          0,
+        ) +
+        todayPickUpCompleteParcels.reduce(
+          (total, parcel) => total + (Number(parcel.parcelWeight) || 0),
+          0,
+        );
+
+      res.send({
+        success: true,
+        riderData,
+        allHandledParcels,
+        assignedParcels,
+        holdUpParcels,
+        deliveredParcels,
+        totalCollectedAmount,
+        conversionRate,
+        loadHandled,
+        todaysParcels,
+        allDeliveryCompleteParcels,
+        allPickUpCompleteParcels,
+        todaysParcelCount: todaysParcels.length || 0,
+        todayPickUpCompleteParcels,
+        todayDeliveryCompleteParcels,
+        todaysCompleteTotal:
+          todayPickUpCompleteParcels.length +
+            todayDeliveryCompleteParcels.length || 0,
+      });
+    } catch (error) {
+      console.error("Rider API Error:", error);
+      res
+        .status(500)
+        .send({ success: false, message: "Internal Server Error" });
+    }
+  },
+);
 
 app.patch("/rider/status/:email", async (req, res) => {
   try {
@@ -698,38 +722,45 @@ app.patch("/rider/status/:email", async (req, res) => {
   }
 });
 
-app.patch("/riders/hold-parcel/update", verifyFireBaseToken, verifyRiderToken, async (req, res) => {
-  try {
-    const { ridersCollections, parcelsCollections } = await connectDB();
-    const { riderId, parcelId } = req.body;
+app.patch(
+  "/riders/hold-parcel/update",
+  verifyFireBaseToken,
+  verifyRiderToken,
+  async (req, res) => {
+    try {
+      const { ridersCollections, parcelsCollections } = await connectDB();
+      const { riderId, parcelId } = req.body;
 
-    const result = await ridersCollections.updateOne(
-      { _id: new ObjectId(riderId) },
-      {
-        $set: { "activeTasks.$[elem].isHold": true },
-      },
-      {
-        arrayFilters: [{ "elem.parcelId": new ObjectId(parcelId) }],
-      },
-    );
+      const result = await ridersCollections.updateOne(
+        { _id: new ObjectId(riderId) },
+        {
+          $set: { "activeTasks.$[elem].isHold": true },
+        },
+        {
+          arrayFilters: [{ "elem.parcelId": new ObjectId(parcelId) }],
+        },
+      );
 
-    await parcelsCollections.updateOne(
-      { _id: new ObjectId(parcelId) },
-      { $set: { deliveryStatus: "hold" } },
-    );
+      await parcelsCollections.updateOne(
+        { _id: new ObjectId(parcelId) },
+        { $set: { deliveryStatus: "hold" } },
+      );
 
-    const parcelData = await parcelsCollections.findOne({
-      _id: new ObjectId(parcelId),
-    });
-    await logTracking(parcelData, "hold-up");
+      const parcelData = await parcelsCollections.findOne({
+        _id: new ObjectId(parcelId),
+      });
+      await logTracking(parcelData, "hold-up");
 
-    res
-      .status(200)
-      .send({ success: true, message: "Parcel marked as hold everywhere!" });
-  } catch (error) {
-    res.status(500).send({ success: false, message: "Internal Server Error" });
-  }
-});
+      res
+        .status(200)
+        .send({ success: true, message: "Parcel marked as hold everywhere!" });
+    } catch (error) {
+      res
+        .status(500)
+        .send({ success: false, message: "Internal Server Error" });
+    }
+  },
+);
 
 app.post("/riders", async (req, res) => {
   try {
@@ -826,53 +857,58 @@ app.get("/riders/available/:areaName", async (req, res) => {
   }
 });
 
-app.patch("/riders/:id", verifyFireBaseToken, verifyAdminToken, async (req, res) => {
-  try {
-    const { ridersCollections, userCollections } = await connectDB();
-    const id = req.params.id;
-    const { status, workStatus, email } = req.body;
+app.patch(
+  "/riders/:id",
+  verifyFireBaseToken,
+  verifyAdminToken,
+  async (req, res) => {
+    try {
+      const { ridersCollections, userCollections } = await connectDB();
+      const id = req.params.id;
+      const { status, workStatus, email } = req.body;
 
-    const riderFilter = { _id: new ObjectId(id) };
-    const riderUpdate = {
-      $set: {
-        status: status,
-        workStatus: workStatus,
-        updatedAt: new Date(),
-      },
-    };
-
-    const riderResult = await ridersCollections.updateOne(
-      riderFilter,
-      riderUpdate,
-    );
-
-    if (riderResult.modifiedCount > 0) {
-      const userFilter = { email: email };
-      const userUpdate = {
+      const riderFilter = { _id: new ObjectId(id) };
+      const riderUpdate = {
         $set: {
-          role: "rider",
+          status: status,
+          workStatus: workStatus,
+          updatedAt: new Date(),
         },
       };
 
-      const userResult = await userCollections.updateOne(
-        userFilter,
-        userUpdate,
+      const riderResult = await ridersCollections.updateOne(
+        riderFilter,
+        riderUpdate,
       );
 
-      res.send({
-        success: true,
-        message: "Rider approved and user role updated to rider",
-        riderResult,
-        userResult,
-      });
-    } else {
-      res.status(404).send({ message: "Rider not found or no changes made" });
+      if (riderResult.modifiedCount > 0) {
+        const userFilter = { email: email };
+        const userUpdate = {
+          $set: {
+            role: "rider",
+          },
+        };
+
+        const userResult = await userCollections.updateOne(
+          userFilter,
+          userUpdate,
+        );
+
+        res.send({
+          success: true,
+          message: "Rider approved and user role updated to rider",
+          riderResult,
+          userResult,
+        });
+      } else {
+        res.status(404).send({ message: "Rider not found or no changes made" });
+      }
+    } catch (error) {
+      console.error("Error approving rider:", error);
+      res.status(500).send({ message: "Internal Server Error" });
     }
-  } catch (error) {
-    console.error("Error approving rider:", error);
-    res.status(500).send({ message: "Internal Server Error" });
-  }
-});
+  },
+);
 
 app.patch("/parcels/assign-rider", async (req, res) => {
   try {
@@ -990,88 +1026,98 @@ app.patch("/parcels/assign-delivery", async (req, res) => {
   }
 });
 
-app.patch("/riders/complete-pickup/update", verifyFireBaseToken, verifyRiderToken, async (req, res) => {
-  try {
-    const { riderId, parcelId, trackingID } = req.body;
-    const { parcelsCollections, ridersCollections } = await connectDB();
+app.patch(
+  "/riders/complete-pickup/update",
+  verifyFireBaseToken,
+  verifyRiderToken,
+  async (req, res) => {
+    try {
+      const { riderId, parcelId, trackingID } = req.body;
+      const { parcelsCollections, ridersCollections } = await connectDB();
 
-    await parcelsCollections.updateOne(
-      { _id: new ObjectId(parcelId) },
-      {
-        $set: {
-          deliveryStatus: "picked-up",
-          currentLocation: "Picked & On Way",
+      await parcelsCollections.updateOne(
+        { _id: new ObjectId(parcelId) },
+        {
+          $set: {
+            deliveryStatus: "picked-up",
+            currentLocation: "Picked & On Way",
+          },
         },
-      },
-    );
-
-    const parcel = await parcelsCollections.findOne({
-      _id: new ObjectId(parcelId),
-    });
-    await logTracking(parcel, "rider-carrying");
-
-    const result = await ridersCollections.updateOne(
-      { _id: new ObjectId(riderId) },
-      {
-        $inc: { currentTasks: -1, successfullyComplete: 1 },
-        $pull: { activeTasks: { parcelId: new ObjectId(parcelId) } },
-      },
-    );
-
-    res.send({ success: true, result });
-    console.log(riderId, parcelId, trackingID);
-  } catch (error) {
-    res
-      .status(500)
-      .send({ message: "Error completing pickup", error: error.message });
-  }
-});
-
-app.patch("/riders/complete-delivered/update", verifyFireBaseToken, verifyRiderToken, async (req, res) => {
-  try {
-    const { riderId, parcelId, trackingID } = req.body;
-    const { parcelsCollections, ridersCollections, merchantsCollections } =
-      await connectDB();
-
-    await parcelsCollections.updateOne(
-      { _id: new ObjectId(parcelId) },
-      {
-        $set: {
-          deliveryStatus: "delivered",
-          currentLocation: "delivered",
-          deliveredAt: new Date(),
-        },
-      },
-    );
-    const parcel = await parcelsCollections.findOne({
-      _id: new ObjectId(parcelId),
-    });
-
-    const merchantEmail = parcel.senderInfo.email;
-    if (merchantEmail) {
-      await merchantsCollections.updateOne(
-        { email: merchantEmail },
-        { $inc: { totalSuccessfulDeliveries: 1 } },
       );
+
+      const parcel = await parcelsCollections.findOne({
+        _id: new ObjectId(parcelId),
+      });
+      await logTracking(parcel, "rider-carrying");
+
+      const result = await ridersCollections.updateOne(
+        { _id: new ObjectId(riderId) },
+        {
+          $inc: { currentTasks: -1, successfullyComplete: 1 },
+          $pull: { activeTasks: { parcelId: new ObjectId(parcelId) } },
+        },
+      );
+
+      res.send({ success: true, result });
+      console.log(riderId, parcelId, trackingID);
+    } catch (error) {
+      res
+        .status(500)
+        .send({ message: "Error completing pickup", error: error.message });
     }
+  },
+);
 
-    await logTracking(parcel, "delivered");
+app.patch(
+  "/riders/complete-delivered/update",
+  verifyFireBaseToken,
+  verifyRiderToken,
+  async (req, res) => {
+    try {
+      const { riderId, parcelId, trackingID } = req.body;
+      const { parcelsCollections, ridersCollections, merchantsCollections } =
+        await connectDB();
 
-    const result = await ridersCollections.updateOne(
-      { _id: new ObjectId(riderId) },
-      {
-        $inc: { currentTasks: -1, successfullyComplete: 1 },
-        $pull: { activeTasks: { parcelId: new ObjectId(parcelId) } },
-      },
-    );
+      await parcelsCollections.updateOne(
+        { _id: new ObjectId(parcelId) },
+        {
+          $set: {
+            deliveryStatus: "delivered",
+            currentLocation: "delivered",
+            deliveredAt: new Date(),
+          },
+        },
+      );
+      const parcel = await parcelsCollections.findOne({
+        _id: new ObjectId(parcelId),
+      });
 
-    res.send({ success: true, result });
-  } catch (error) {
-    res
-      .status(500)
-      .send({ message: "Error completing pickup", error: error.message });
-  }
-});
+      const merchantEmail = parcel.senderInfo.email;
+      if (merchantEmail) {
+        await merchantsCollections.updateOne(
+          { email: merchantEmail },
+          { $inc: { totalSuccessfulDeliveries: 1 } },
+        );
+      }
+
+      await logTracking(parcel, "delivered");
+
+      const result = await ridersCollections.updateOne(
+        { _id: new ObjectId(riderId) },
+        {
+          $inc: { currentTasks: -1, successfullyComplete: 1 },
+          $pull: { activeTasks: { parcelId: new ObjectId(parcelId) } },
+        },
+      );
+
+      res.send({ success: true, result });
+    } catch (error) {
+      res
+        .status(500)
+        .send({ message: "Error completing pickup", error: error.message });
+    }
+  },
+);
 
 app.delete("/riders/:id", async (req, res) => {
   try {
@@ -1116,16 +1162,21 @@ app.delete("/riders/:id", async (req, res) => {
 });
 
 /* ---- Merchant APIs Start ---- */
-app.get("/all-merchants", verifyFireBaseToken, verifyAdminToken, async (req, res) => {
-  try {
-    const { merchantsCollections } = await connectDB();
-    const result = await merchantsCollections.find({}).toArray();
-    console.log(req.decoded_email);
-    res.send(result);
-  } catch (error) {
-    res.status(500).send({ success: false, error: "Internal Server Error" });
-  }
-});
+app.get(
+  "/all-merchants",
+  verifyFireBaseToken,
+  verifyAdminToken,
+  async (req, res) => {
+    try {
+      const { merchantsCollections } = await connectDB();
+      const result = await merchantsCollections.find({}).toArray();
+      console.log(req.decoded_email);
+      res.send(result);
+    } catch (error) {
+      res.status(500).send({ success: false, error: "Internal Server Error" });
+    }
+  },
+);
 
 app.get("/area-merchant/:hubName", async (req, res) => {
   try {
@@ -1465,52 +1516,58 @@ app.get("/all-payouts", async (req, res) => {
 });
 
 /*---- Parcels Related APIs ----*/
-app.get("/parcels", async (req, res) => {
-  try {
-    const { parcelsCollections } = await connectDB();
-    const skip = parseInt(req.query.skip);
-    const limit = parseInt(req.query.limit);
-    const { email, filter, search } = req.query;
+app.get(
+  "/parcels",
+  verifyFireBaseToken,
+  verifyMerchantToken,
+  verifyOwner,
+  async (req, res) => {
+    try {
+      const { parcelsCollections } = await connectDB();
+      const skip = parseInt(req.query.skip);
+      const limit = parseInt(req.query.limit);
+      const { email, filter, search } = req.query;
 
-    let startDate = new Date();
-    if (filter === "this-week") {
-      startDate.setDate(startDate.getDate() - 7);
-    } else if (filter === "last-week") {
-      startDate.setDate(startDate.getDate() - 14);
-    } else if (filter === "last-month") {
-      startDate.setMonth(startDate.getMonth() - 1);
-    } else {
-      startDate = null;
+      let startDate = new Date();
+      if (filter === "this-week") {
+        startDate.setDate(startDate.getDate() - 7);
+      } else if (filter === "last-week") {
+        startDate.setDate(startDate.getDate() - 14);
+      } else if (filter === "last-month") {
+        startDate.setMonth(startDate.getMonth() - 1);
+      } else {
+        startDate = null;
+      }
+
+      const query = { "senderInfo.email": email };
+      if (startDate) {
+        query.createdAt = { $gte: startDate.toISOString() };
+      }
+      if (req.query.status) {
+        query.deliveryStatus = req.query.status;
+      }
+      // if (search) {
+      //   query.$or = [
+      //     { trackingID: { $regex: search, $options: "i" } },
+      //     { "receiverInfo.name": { $regex: search, $options: "i" } },
+      //   ];
+      // }
+
+      const result = await parcelsCollections
+        .find(query)
+        .sort({ createdAt: -1 })
+        .skip(skip)
+        .limit(limit)
+        .toArray();
+
+      const count = await parcelsCollections.countDocuments(query);
+
+      res.send({ count, data: result });
+    } catch (error) {
+      res.status(500).send({ message: "Internal Server Error" });
     }
-
-    const query = { "senderInfo.email": email };
-    if (startDate) {
-      query.createdAt = { $gte: startDate.toISOString() };
-    }
-    if (req.query.status) {
-      query.deliveryStatus = req.query.status;
-    }
-    // if (search) {
-    //   query.$or = [
-    //     { trackingID: { $regex: search, $options: "i" } },
-    //     { "receiverInfo.name": { $regex: search, $options: "i" } },
-    //   ];
-    // }
-
-    const result = await parcelsCollections
-      .find(query)
-      .sort({ createdAt: -1 })
-      .skip(skip)
-      .limit(limit)
-      .toArray();
-
-    const count = await parcelsCollections.countDocuments(query);
-
-    res.send({ count, data: result });
-  } catch (error) {
-    res.status(500).send({ message: "Internal Server Error" });
-  }
-});
+  },
+);
 
 app.get("/parcel/:parcelID", async (req, res) => {
   try {
@@ -1524,21 +1581,27 @@ app.get("/parcel/:parcelID", async (req, res) => {
   }
 });
 
-app.get("/late-invoices/:email", async (req, res) => {
-  try {
-    const { parcelsCollections } = await connectDB();
-    const lateInvoices = await parcelsCollections
-      .find({
-        "senderInfo.email": req.params.email,
-        deliveryChargeStatus: "unpaid",
-        deliveryStatus: "delivered",
-      })
-      .toArray();
-    res.send(lateInvoices);
-  } catch (error) {
-    res.status(500).send({ message: "Failed to fetch late invoices" });
-  }
-});
+app.get(
+  "/late-invoices/:email",
+  verifyFireBaseToken,
+  verifyMerchantToken,
+  verifyOwner,
+  async (req, res) => {
+    try {
+      const { parcelsCollections } = await connectDB();
+      const lateInvoices = await parcelsCollections
+        .find({
+          "senderInfo.email": req.params.email,
+          deliveryChargeStatus: "unpaid",
+          deliveryStatus: "delivered",
+        })
+        .toArray();
+      res.send(lateInvoices);
+    } catch (error) {
+      res.status(500).send({ message: "Failed to fetch late invoices" });
+    }
+  },
+);
 
 app.get("/parcels/unpaid/:email", async (req, res) => {
   try {
@@ -1593,104 +1656,116 @@ app.get("/parcels/status/:email", async (req, res) => {
   }
 });
 
-app.get("/parcels/stats/:email", async (req, res) => {
-  try {
-    const { parcelsCollections } = await connectDB();
-    const stats = await parcelsCollections
-      .aggregate([
-        {
-          $match: { "senderInfo.email": req.params.email },
-        },
-        {
-          $group: {
-            _id: {
-              deliveryStatus: "$deliveryStatus",
-              deliveryChargeStatus: "$deliveryChargeStatus",
-            },
-            count: { $sum: 1 },
+app.get(
+  "/parcels/stats/:email",
+  verifyFireBaseToken,
+  verifyMerchantToken,
+  verifyOwner,
+  async (req, res) => {
+    try {
+      const { parcelsCollections } = await connectDB();
+      const stats = await parcelsCollections
+        .aggregate([
+          {
+            $match: { "senderInfo.email": req.params.email },
           },
-        },
-      ])
-      .toArray();
-
-    const formattedData = {
-      toPay: 0,
-      readyPickUp: 0,
-      inTransit: 0,
-      readyDeliver: 0,
-      delivered: 0,
-    };
-
-    stats.forEach((element) => {
-      if (element._id.deliveryChargeStatus === "unpaid")
-        formattedData.toPay += element.count;
-      if (element._id.deliveryStatus === "assign-pickup-rider")
-        formattedData.readyPickUp += element.count;
-      if (element._id.deliveryStatus === "in-transit")
-        formattedData.inTransit += element.count;
-      if (element._id.deliveryStatus === "assign-delivery-rider")
-        formattedData.readyDeliver += element.count;
-      if (element._id.deliveryStatus === "delivered")
-        formattedData.delivered += element.count;
-    });
-
-    res.send(formattedData);
-  } catch (error) {
-    res.status(500).send({ message: "Internal Server Error" });
-  }
-});
-
-app.get("/revenue/stats/:email", async (req, res) => {
-  try {
-    const { parcelsCollections } = await connectDB();
-    const { filter } = req.query;
-
-    let startDate = new Date();
-
-    if (filter === "this-week") {
-      startDate.setDate(startDate.getDate() - 7);
-    } else if (filter === "last-week") {
-      startDate.setDate(startDate.getDate() - 14);
-    } else if (filter === "last-month") {
-      startDate.setMonth(startDate.getMonth() - 1);
-    } else {
-      startDate.setDate(startDate.getDate() - 7);
-    }
-
-    const stats = await parcelsCollections
-      .aggregate([
-        {
-          $match: {
-            "senderInfo.email": req.params.email,
-            deliveryStatus: "delivered",
-            createdAt: { $gte: startDate.toISOString() },
-          },
-        },
-        {
-          $group: {
-            _id: {
-              $dateToString: {
-                format: "%d %b",
-                date: { $toDate: "$createdAt" },
+          {
+            $group: {
+              _id: {
+                deliveryStatus: "$deliveryStatus",
+                deliveryChargeStatus: "$deliveryChargeStatus",
               },
+              count: { $sum: 1 },
             },
-            totalRevenue: { $sum: "$codAmount" },
           },
-        },
-        { $sort: { _id: 1 } },
-      ])
-      .toArray();
+        ])
+        .toArray();
 
-    const chartData = stats.map((element) => ({
-      name: element._id,
-      value: element.totalRevenue,
-    }));
+      const formattedData = {
+        toPay: 0,
+        readyPickUp: 0,
+        inTransit: 0,
+        readyDeliver: 0,
+        delivered: 0,
+      };
 
-    res.send(chartData);
-  } catch (error) {
-    res.status(500).send({ message: "Internal Server Error" });
-  }
-});
+      stats.forEach((element) => {
+        if (element._id.deliveryChargeStatus === "unpaid")
+          formattedData.toPay += element.count;
+        if (element._id.deliveryStatus === "assign-pickup-rider")
+          formattedData.readyPickUp += element.count;
+        if (element._id.deliveryStatus === "in-transit")
+          formattedData.inTransit += element.count;
+        if (element._id.deliveryStatus === "assign-delivery-rider")
+          formattedData.readyDeliver += element.count;
+        if (element._id.deliveryStatus === "delivered")
+          formattedData.delivered += element.count;
+      });
+
+      res.send(formattedData);
+    } catch (error) {
+      res.status(500).send({ message: "Internal Server Error" });
+    }
+  },
+);
+
+app.get(
+  "/revenue/stats/:email",
+  verifyFireBaseToken,
+  verifyMerchantToken,
+  verifyOwner,
+  async (req, res) => {
+    try {
+      const { parcelsCollections } = await connectDB();
+      const { filter } = req.query;
+
+      let startDate = new Date();
+
+      if (filter === "this-week") {
+        startDate.setDate(startDate.getDate() - 7);
+      } else if (filter === "last-week") {
+        startDate.setDate(startDate.getDate() - 14);
+      } else if (filter === "last-month") {
+        startDate.setMonth(startDate.getMonth() - 1);
+      } else {
+        startDate.setDate(startDate.getDate() - 7);
+      }
+
+      const stats = await parcelsCollections
+        .aggregate([
+          {
+            $match: {
+              "senderInfo.email": req.params.email,
+              deliveryStatus: "delivered",
+              createdAt: { $gte: startDate.toISOString() },
+            },
+          },
+          {
+            $group: {
+              _id: {
+                $dateToString: {
+                  format: "%d %b",
+                  date: { $toDate: "$createdAt" },
+                },
+              },
+              totalRevenue: { $sum: "$codAmount" },
+            },
+          },
+          { $sort: { _id: 1 } },
+        ])
+        .toArray();
+
+      const chartData = stats.map((element) => ({
+        name: element._id,
+        value: element.totalRevenue,
+      }));
+
+      res.send(chartData);
+    } catch (error) {
+      res.status(500).send({ message: "Internal Server Error" });
+    }
+  },
+);
 
 app.get("/merchant-parcels/:email", async (req, res) => {
   try {
@@ -2078,159 +2153,182 @@ app.post("/deposit-HQ/:hubName", async (req, res) => {
   }
 });
 
-app.get("/hub-deposit-history", verifyFireBaseToken, verifyRoles('hub-manager', "admin"), async (req, res) => {
-  try {
-    const { hubName, status } = req.query;
-    const { hqPaymentsCollections } = await connectDB();
+app.get(
+  "/hub-deposit-history",
+  verifyFireBaseToken,
+  verifyRoles("hub-manager", "admin"),
+  async (req, res) => {
+    try {
+      const { hubName, status } = req.query;
+      const { hqPaymentsCollections } = await connectDB();
 
-    const query = {};
+      const query = {};
 
-    if (hubName) {
-      query.hubName = hubName;
+      if (hubName) {
+        query.hubName = hubName;
+      }
+
+      if (status) {
+        query.status = status;
+      }
+
+      const depositHistory = await hqPaymentsCollections
+        .find(query)
+        .sort({ createdAt: -1 })
+        .toArray();
+
+      res.send({
+        success: true,
+        hubName,
+        totalDeposits: depositHistory.length,
+        history: depositHistory,
+      });
+    } catch (error) {
+      res
+        .status(500)
+        .send({ success: false, message: "Internal Server Error" });
     }
+  },
+);
 
-    if (status) {
-      query.status = status;
+app.patch(
+  "/approve-deposit/:id",
+  verifyFireBaseToken,
+  verifyAdminToken,
+  async (req, res) => {
+    try {
+      const { id } = req.params;
+      const { hqPaymentsCollections, parcelsCollections } = await connectDB();
+
+      const invoice = await hqPaymentsCollections.findOne({
+        _id: new ObjectId(id),
+      });
+      const objectParcelIds = invoice.parcelIds.map((id) => new ObjectId(id));
+
+      await hqPaymentsCollections.updateOne(
+        { _id: new ObjectId(id) },
+        { $set: { status: "approved", approvedAt: new Date().toISOString() } },
+      );
+
+      await parcelsCollections.updateMany(
+        { _id: { $in: objectParcelIds } },
+        { $set: { isDepositedToHQ: true, depositRequestStatus: "approved" } },
+      );
+
+      res.send({ success: true, message: "Deposit approved successfully!" });
+    } catch (error) {
+      res
+        .status(500)
+        .send({ success: false, message: "Internal Server Error" });
     }
-
-    const depositHistory = await hqPaymentsCollections
-      .find(query)
-      .sort({ createdAt: -1 })
-      .toArray();
-
-    res.send({
-      success: true,
-      hubName,
-      totalDeposits: depositHistory.length,
-      history: depositHistory,
-    });
-  } catch (error) {
-    res.status(500).send({ success: false, message: "Internal Server Error" });
-  }
-});
-
-app.patch("/approve-deposit/:id", verifyFireBaseToken, verifyAdminToken, async (req, res) => {
-  try {
-    const { id } = req.params;
-    const { hqPaymentsCollections, parcelsCollections } = await connectDB();
-
-    const invoice = await hqPaymentsCollections.findOne({
-      _id: new ObjectId(id),
-    });
-    const objectParcelIds = invoice.parcelIds.map((id) => new ObjectId(id));
-
-    await hqPaymentsCollections.updateOne(
-      { _id: new ObjectId(id) },
-      { $set: { status: "approved", approvedAt: new Date().toISOString() } },
-    );
-
-    await parcelsCollections.updateMany(
-      { _id: { $in: objectParcelIds } },
-      { $set: { isDepositedToHQ: true, depositRequestStatus: "approved" } },
-    );
-
-    res.send({ success: true, message: "Deposit approved successfully!" });
-  } catch (error) {
-    res.status(500).send({ success: false, message: "Internal Server Error" });
-  }
-});
+  },
+);
 
 /* ---- Master Admin ---- */
-app.get("/master-admin/main-dashboard", verifyFireBaseToken, verifyAdminToken, async (req, res) => {
-  try {
-    const { parcelsCollections, merchantsCollections, ridersCollections } =
-      await connectDB();
-    const revenueResult = await parcelsCollections
-      .aggregate([
-        {
-          $match: {
-            deliveryStatus: "delivered",
+app.get(
+  "/master-admin/main-dashboard",
+  verifyFireBaseToken,
+  verifyAdminToken,
+  async (req, res) => {
+    try {
+      const { parcelsCollections, merchantsCollections, ridersCollections } =
+        await connectDB();
+      const revenueResult = await parcelsCollections
+        .aggregate([
+          {
+            $match: {
+              deliveryStatus: "delivered",
+            },
           },
-        },
-        {
-          $group: {
-            _id: null,
-            total: { $sum: "$deliveryCharge" },
+          {
+            $group: {
+              _id: null,
+              total: { $sum: "$deliveryCharge" },
+            },
           },
-        },
-      ])
-      .toArray();
-    const totalRevenue = revenueResult.length > 0 ? revenueResult[0].total : 0;
-    const totalParcels = await parcelsCollections.estimatedDocumentCount();
-    const totalMerchants = await merchantsCollections.estimatedDocumentCount();
-    const activeRiders = await ridersCollections.countDocuments({
-      currentTasks: { $gt: 0 },
-    });
-    const pendingPickUpAndDeliveryCount =
-      await parcelsCollections.countDocuments({
+        ])
+        .toArray();
+      const totalRevenue =
+        revenueResult.length > 0 ? revenueResult[0].total : 0;
+      const totalParcels = await parcelsCollections.estimatedDocumentCount();
+      const totalMerchants =
+        await merchantsCollections.estimatedDocumentCount();
+      const activeRiders = await ridersCollections.countDocuments({
+        currentTasks: { $gt: 0 },
+      });
+      const pendingPickUpAndDeliveryCount =
+        await parcelsCollections.countDocuments({
+          deliveryStatus: {
+            $in: ["assign-pickup-rider", "assign-delivery-rider"],
+          },
+        });
+      const inTransitAndPickedCount = await parcelsCollections.countDocuments({
         deliveryStatus: {
-          $in: ["assign-pickup-rider", "assign-delivery-rider"],
+          $in: ["rider-carrying", "in-transit"],
         },
       });
-    const inTransitAndPickedCount = await parcelsCollections.countDocuments({
-      deliveryStatus: {
-        $in: ["rider-carrying", "in-transit"],
-      },
-    });
-    const dispatchCount = await parcelsCollections.countDocuments({
-      deliveryStatus: "delivered",
-    });
+      const dispatchCount = await parcelsCollections.countDocuments({
+        deliveryStatus: "delivered",
+      });
 
-    const transitLiquidityResult = await parcelsCollections
-      .aggregate([
-        {
-          $match: {
-            status: "delivered",
-            revMethod: "COD",
-            isDepositedToHQ: false,
+      const transitLiquidityResult = await parcelsCollections
+        .aggregate([
+          {
+            $match: {
+              status: "delivered",
+              revMethod: "COD",
+              isDepositedToHQ: false,
+            },
           },
-        },
-        {
-          $group: {
-            _id: null,
-            totalTransitCash: { $sum: "$codAmount" },
+          {
+            $group: {
+              _id: null,
+              totalTransitCash: { $sum: "$codAmount" },
+            },
           },
+        ])
+        .toArray();
+      const codInTransit =
+        transitLiquidityResult.length > 0
+          ? transitLiquidityResult[0].totalTransitCash
+          : 0;
+
+      const recentParcels = await parcelsCollections
+        .find({})
+        .sort({ createdAt: -1 })
+        .limit(3)
+        .project({
+          trackingID: 1,
+          "senderInfo.name": 1,
+          "receiverInfo.name": 1,
+          deliveryStatus: 1,
+          codAmount: 1,
+        })
+        .toArray();
+
+      res.status(200).send({
+        success: true,
+        metrics: {
+          totalRevenue,
+          totalParcels,
+          totalMerchants,
+          activeRiders,
+          codInTransit,
         },
-      ])
-      .toArray();
-    const codInTransit =
-      transitLiquidityResult.length > 0
-        ? transitLiquidityResult[0].totalTransitCash
-        : 0;
-
-    const recentParcels = await parcelsCollections
-      .find({})
-      .sort({ createdAt: -1 })
-      .limit(3)
-      .project({
-        trackingID: 1,
-        "senderInfo.name": 1,
-        "receiverInfo.name": 1,
-        deliveryStatus: 1,
-        codAmount: 1,
-      })
-      .toArray();
-
-    res.status(200).send({
-      success: true,
-      metrics: {
-        totalRevenue,
-        totalParcels,
-        totalMerchants,
-        activeRiders,
-        codInTransit,
-      },
-      pipeline: {
-        pendingPickUpAndDeliveryCount,
-        inTransitAndPickedCount,
-        dispatchCount,
-      },
-      recentParcels,
-    });
-  } catch (error) {
-    res.status(500).send({ success: false, message: "Internal Server Error" });
-  }
-});
+        pipeline: {
+          pendingPickUpAndDeliveryCount,
+          inTransitAndPickedCount,
+          dispatchCount,
+        },
+        recentParcels,
+      });
+    } catch (error) {
+      res
+        .status(500)
+        .send({ success: false, message: "Internal Server Error" });
+    }
+  },
+);
 
 // Health check
 app.get("/", (req, res) => {
